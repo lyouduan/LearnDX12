@@ -95,6 +95,7 @@
     <None Include="shader\lightingUtil.hlsl" />
     <None Include="shader\default.hlsl" />
     <None Include="shader\column.hlsl" />
+    <None Include="shader\treeBillboard.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />

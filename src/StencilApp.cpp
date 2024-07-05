@@ -91,8 +91,6 @@ void StencilApp::Draw()
 	cmdList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress() + 1 * passCBByteSize);
 	cmdList->SetPipelineState(psos["reflectionsStencil"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Reflect]);
-	cmdList->SetPipelineState(psos["shadow"].Get());
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Shadow]);
 
 	// 还原passCB和Ref值
 	cmdList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress());

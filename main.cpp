@@ -1,6 +1,6 @@
 #include "./src/stdafx.h"
 
-#define Stencil
+#define Land
 
 #ifdef Stencil
 #include "./src/StencilApp.h"

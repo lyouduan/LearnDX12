@@ -8,10 +8,11 @@ using namespace DirectX;
 const int gNumFrameResources = 4;
 enum RenderLayer : int
 {
-	Opaque = 0,
-	Transparent = 1,
-	AlphaTest = 2,
-	Count = 3
+	Opaque,
+	Transparent ,
+	AlphaTest,
+	TreeBillboardAlphaTest,
+	Count
 };
 struct RenderItem
 {
@@ -31,7 +32,6 @@ struct RenderItem
 	UINT startIndexLocation = 0;
 	UINT baseVertexLocation = 0;
 };
-
 
 
 class LandAndWavesApp : public D3DApp
@@ -69,9 +69,10 @@ private:
 	void BuildShadersAndInputLayout();
 	void BuildShapeGeometry();
 	void BuildBoxGeometry();
+	void BuildTreeBillboardGeometry();
+
 	void BuildMaterials();
 	void LoadTextures();
-
 	void BuildRenderItem();
 	void BuildPSO();
 	void DrawRenderItems(const std::vector<RenderItem*>& ritems);
@@ -83,6 +84,7 @@ protected:
 	ComPtr<ID3D12RootSignature> rootSignature;
 	//ComPtr<ID3D12PipelineState> pipelineState;
 	std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayoutDesc;
+	std::vector<D3D12_INPUT_ELEMENT_DESC> treeBillboardInputLayoutDesc;
 	ComPtr<ID3DBlob> vertexShader;
 	ComPtr<ID3DBlob> pixelShader;
 
@@ -123,7 +125,7 @@ protected:
 	float sunPhi = XM_PIDIV4;
 
 	float theta = 1.5f * XM_PI;;
-	float phi = XM_PIDIV4;
-	float radius = 5.0;
+	float phi = XM_PIDIV4 -0.1;
+	float radius = 50.0;
 };
 

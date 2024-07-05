@@ -23,6 +23,8 @@ bool LandAndWavesApp::Init(HINSTANCE hInstance, int nShowCmd)
 	BuildBoxGeometry();
 	BuildMaterials();
 	BuildWavesGeometryBuffers();
+	BuildTreeBillboardGeometry();
+
 	BuildRenderItem();
 	BuildFrameResources();
 	BuildDescriptorHeaps();
@@ -56,7 +58,7 @@ void LandAndWavesApp::Draw()
 
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHeap->GetCPUDescriptorHandleForHeapStart(), ref_mCurrentBackBuffer, rtvDescriptorSize);
 	//const float clearColor[] = { 0.4f, 0.2f, 0.2f, 1.0f };
-	cmdList->ClearRenderTargetView(rtvHandle, DirectX::Colors::Black, 0, nullptr);
+	cmdList->ClearRenderTargetView(rtvHandle, (float*)&passConstants.fogColor, 0, nullptr);
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvHeap->GetCPUDescriptorHandleForHeapStart();
 	cmdList->ClearDepthStencilView(
 		dsvHandle,	//DSV描述符句柄
@@ -78,12 +80,17 @@ void LandAndWavesApp::Draw()
 	auto passCB = mCurrFrameResource->passCB->Resource();
 	cmdList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress());
 	
-	cmdList->OMSetStencilRef(0);
 	cmdList->SetPipelineState(psos["opaque"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
-	DrawRenderItems(ritemLayer[(int)RenderLayer::AlphaTest]);
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Transparent]);
 
+	cmdList->SetPipelineState(psos["alphaTested"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::AlphaTest]);
+
+	cmdList->SetPipelineState(psos["treeBillboard"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::TreeBillboardAlphaTest]);
+
+	cmdList->SetPipelineState(psos["transparent"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Transparent]);
 	
 
 	auto trans2 = CD3DX12_RESOURCE_BARRIER::Transition(swapChainBuffer[ref_mCurrentBackBuffer].Get(),
@@ -150,20 +157,20 @@ void LandAndWavesApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
-		float dx = XMConvertToRadians(static_cast<float>(lastMousePos.x - x));
-		float dy = XMConvertToRadians(static_cast<float>(lastMousePos.y - y));
+		float dx = XMConvertToRadians(0.25 * static_cast<float>(lastMousePos.x - x));
+		float dy = XMConvertToRadians(0.25 * static_cast<float>(lastMousePos.y - y));
 		theta += dx;
 		phi += dy;
 		theta = MathHelper::Clamp(theta, 0.1f, XM_PI - 0.1f);
 	}
 	else if ((btnState & MK_RBUTTON) != 0)
 	{
-		float dx = 0.005f * static_cast<float>(x - lastMousePos.x);
-		float dy = 0.005f * static_cast<float>(y - lastMousePos.y);
+		float dx = 0.02f * static_cast<float>(x - lastMousePos.x);
+		float dy = 0.02f * static_cast<float>(y - lastMousePos.y);
 		//根据鼠标输入更新摄像机可视范围半径
 		radius += dx - dy;
 		//限制可视范围半径
-		radius = MathHelper::Clamp(radius, 1.0f, 20.0f);
+		radius = MathHelper::Clamp(radius, 5.0f, 150.0f);
 	}
 	lastMousePos.x = x;
 	lastMousePos.y = y;
@@ -185,7 +192,6 @@ void LandAndWavesApp::OnKeyboardInput(const GameTime& gt)
 
 	//将Phi约束在[0, PI/2]之间
 	sunPhi = MathHelper::Clamp(sunPhi, 0.1f, XM_PIDIV2);
-
 }
 
 void LandAndWavesApp::UpdateObjectCBs()
@@ -198,7 +204,7 @@ void LandAndWavesApp::UpdateObjectCBs()
 		if (e->NumFramesDirty > 0)
 		{
 			mWorld = e->world;
-			XMMATRIX w = XMLoadFloat4x4(&mWorld) * XMMatrixScaling(0.8, 0.8, 0.8) * XMMatrixTranslation(0.0, -20.0, 50.f);
+			XMMATRIX w = XMLoadFloat4x4(&mWorld) * XMMatrixTranslation(0.0, -20.0, 50.f);
 			//XMMATRIX赋值给XMFLOAT4X4
 			XMStoreFloat4x4(&objConstants.world, XMMatrixTranspose(w));
 
@@ -231,6 +237,8 @@ void LandAndWavesApp::UpdateMainPassCB()
 	XMMATRIX vp = view * proj;
 	XMStoreFloat4x4(&passConstants.viewProj, XMMatrixTranspose(vp));
 
+	passConstants.eyePosW = { x, y, z };
+
 	// light
 	passConstants.ambientLight = { 0.25f,0.25f,0.35f,1.0f };
 	passConstants.lights[0].direction = { 0.57735f, -0.57735f, 0.57735f };
@@ -242,10 +250,9 @@ void LandAndWavesApp::UpdateMainPassCB()
 	XMVECTOR sunDir = -MathHelper::SphericalToCartesian(1.0, sunTheta, sunPhi);
 	XMStoreFloat3(&passConstants.lights[0].direction, sunDir);
 
-
 	passConstants.fogColor = { 0.7f, 0.7f, 0.7f, 1.0f };
-	passConstants.fogStart = 1.0f;
-	passConstants.fogRange = 150.f;
+	passConstants.fogStart = 20.0f;
+	passConstants.fogRange = 200.f;
 	mCurrFrameResource->passCB->CopyData(0, passConstants);
 }
 
@@ -493,7 +500,7 @@ void LandAndWavesApp::BuildDescriptorHeaps()
 	ThrowIfFailed(device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&cbvHeap)));
 
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-	srvHeapDesc.NumDescriptors = 3; // (objCB + passCB) * frameCounts
+	srvHeapDesc.NumDescriptors = 4; // (objCB + passCB) * frameCounts
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	srvHeapDesc.NodeMask = 0;
@@ -549,6 +556,7 @@ void LandAndWavesApp::BuildConstantBuffers()
 	auto grassTex = textures["grassTex"]->Resource;
 	auto waterTex = textures["waterTex"]->Resource;
 	auto fenceTex = textures["fenceTex"]->Resource;
+	auto treeBillboardTex = textures["treeArrayTex"]->Resource;
 	{
 		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -566,6 +574,15 @@ void LandAndWavesApp::BuildConstantBuffers()
 		srvHandle.Offset(1, srvDescriptorSize);
 		srvDesc.Format = fenceTex->GetDesc().Format;
 		device->CreateShaderResourceView(fenceTex.Get(), &srvDesc, srvHandle);
+
+		srvHandle.Offset(1, srvDescriptorSize);
+		srvDesc.Format = treeBillboardTex->GetDesc().Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+		srvDesc.Texture2DArray.ArraySize = treeBillboardTex->GetDesc().DepthOrArraySize;
+		srvDesc.Texture2DArray.MostDetailedMip = 0;
+		srvDesc.Texture2DArray.MipLevels = -1;
+		srvDesc.Texture2DArray.FirstArraySlice = 0;
+		device->CreateShaderResourceView(treeBillboardTex.Get(), &srvDesc, srvHandle);
 	}
 }
 
@@ -621,6 +638,12 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
 		  { "TEXCOORD",   0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
+	treeBillboardInputLayoutDesc =
+	{
+		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		  { "SIZE",   0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	};
+
 	const D3D_SHADER_MACRO defines[] =
 	{
 		"FOG", "1",
@@ -638,6 +661,9 @@ void LandAndWavesApp::BuildShadersAndInputLayout()
 	shaders["opaquePS"] = CompileShader(std::wstring(L"shader/default.hlsl"), defines, "PSMain", "ps_5_0");
 	shaders["alphaTestedPS"] = CompileShader(std::wstring(L"shader/default.hlsl"), alphaTestDefines, "PSMain", "ps_5_0");
 
+	shaders["treeBillboardVS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), nullptr, "VS", "vs_5_0");
+	shaders["treeBillboardGS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), nullptr, "GS", "gs_5_0");
+	shaders["treeBillboardPS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), alphaTestDefines, "PS", "ps_5_0");
 }
 
 void LandAndWavesApp::BuildShapeGeometry()
@@ -723,36 +749,100 @@ void LandAndWavesApp::BuildBoxGeometry()
 	geometries["boxGeo"] = std::move(geo);
 }
 
+void LandAndWavesApp::BuildTreeBillboardGeometry()
+{
+	struct TreeBillboardVertex
+	{
+		XMFLOAT3 Pos;
+		XMFLOAT2 Size;
+	};
+
+	const int treeCount = 16;
+
+	std::array<TreeBillboardVertex, treeCount> vertices;
+	for (UINT i = 0; i < treeCount; i++)
+	{
+		float x = MathHelper::RandF(-45.0f, 45.0f);
+		float z = MathHelper::RandF(-45.0f, 45.0f);
+		float y = GetHillsHeight(x, z);
+		y -= 12.0f;
+		z += 50.0f;
+
+		vertices[i].Pos = XMFLOAT3(x, y, z);
+		vertices[i].Size = XMFLOAT2(15.0f, 15.0f);
+	}
+
+	std::array<std::uint16_t, treeCount> indices;
+	UINT j = 0;
+	for (UINT i = 0; i < treeCount; i++)
+	{
+		indices[i] = i;
+	}
+
+	const UINT vbByteSize = (UINT)treeCount * sizeof(TreeBillboardVertex);
+	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+
+	auto geo = std::make_unique<MeshGeometry>();
+
+	geo->name = "treeBillboardGeo";
+	geo->vertexBufferByteSize = vbByteSize;
+	geo->vertexByteStride = sizeof(TreeBillboardVertex);
+	geo->indexBufferByteSize = ibByteSize;
+	geo->indexFormat = DXGI_FORMAT_R16_UINT;
+	
+	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
+	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
+
+	SubmeshGeometry submesh;
+	submesh.BaseVertexLocation = 0;
+	submesh.StartIndexLocation = 0;
+	submesh.IndexCount = (UINT)indices.size();
+	geo->DrawArgs["treeBillboard"] = submesh;
+
+	geometries[geo->name] = std::move(geo);
+
+}
+
 void LandAndWavesApp::BuildMaterials()
 {
 
 	auto grass = std::make_unique<Material>();
 	grass->name = "grass";
-	grass->diffuseSrvHeapIndex = 0;
 	grass->matCBIndex = 0;
+	grass->diffuseSrvHeapIndex = 0;
 	grass->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	grass->fresnelR0 = XMFLOAT3(0.01, 0.01, 0.01);
 	grass->roughness = 0.125f;
 
 	auto water = std::make_unique<Material>();
 	water->name = "water";
-	water->diffuseSrvHeapIndex = 1;
 	water->matCBIndex = 1;
+	water->diffuseSrvHeapIndex = 1;
 	water->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	water->fresnelR0 = XMFLOAT3(0.2, 0.2, 0.2);
 	water->roughness = 0.0f;
 
 	auto WireFence = std::make_unique<Material>();
 	WireFence->name = "WireFence";
-	WireFence->diffuseSrvHeapIndex = 2;
 	WireFence->matCBIndex = 2;
+	WireFence->diffuseSrvHeapIndex = 2;
 	WireFence->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	WireFence->fresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
 	WireFence->roughness = 0.25f;
 
+	auto treeBillboard = std::make_unique<Material>();
+	treeBillboard->name = "treeBillboard";
+	treeBillboard->matCBIndex = 3;
+	treeBillboard->diffuseSrvHeapIndex = 3;
+	treeBillboard->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	treeBillboard->fresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
+	treeBillboard->roughness = 0.8f;
+
 	materials["WireFence"] = std::move(WireFence);
 	materials["grass"] = std::move(grass);
 	materials["water"] = std::move(water);
+	materials["treeBillboard"] = std::move(treeBillboard);
 }
 
 void LandAndWavesApp::LoadTextures()
@@ -793,9 +883,21 @@ void LandAndWavesApp::LoadTextures()
 		fenceTex->UploadHeap
 	));
 
+	auto treeArrayTex = std::make_unique<Texture>();
+	treeArrayTex->name = "treeArrayTex";
+	treeArrayTex->Filename = L"./model/treeArray.dds";
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
+		device.Get(),
+		cmdList.Get(),
+		treeArrayTex->Filename.c_str(),
+		treeArrayTex->Resource,
+		treeArrayTex->UploadHeap
+	));
+
 	textures[grassTex->name] = std::move(grassTex);
 	textures[waterTex->name] = std::move(waterTex);
 	textures[fenceTex->name] = std::move(fenceTex);
+	textures[treeArrayTex->name] = std::move(treeArrayTex);
 }
 
 void LandAndWavesApp::BuildPSO()
@@ -807,58 +909,24 @@ void LandAndWavesApp::BuildPSO()
 		reinterpret_cast<BYTE*>(shaders["standardVS"]->GetBufferPointer()),
 		shaders["standardVS"]->GetBufferSize()
 	};
-
 	opaquePsoDesc.PS = {
 		reinterpret_cast<BYTE*>(shaders["opaquePS"]->GetBufferPointer()),
 		shaders["opaquePS"]->GetBufferSize()
 	};
-
 	opaquePsoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
-
 	CD3DX12_RASTERIZER_DESC Raster(D3D12_DEFAULT);
 	//Raster.FillMode = D3D12_FILL_MODE_WIREFRAME;
 	//Raster.CullMode = D3D12_CULL_MODE_BACK;
 	opaquePsoDesc.RasterizerState = Raster;
 	// default blendstate
-	//opaquePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	//opaquePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);;
+	opaquePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	opaquePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);;
 	opaquePsoDesc.SampleMask = UINT_MAX;
 	opaquePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	opaquePsoDesc.NumRenderTargets = 1;
 	opaquePsoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	opaquePsoDesc.SampleDesc.Count = 1;
 	opaquePsoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-
-	D3D12_DEPTH_STENCIL_DESC stencilWrite = {};
-	stencilWrite.DepthEnable = true;
-	stencilWrite.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-	stencilWrite.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-	stencilWrite.StencilEnable = true;
-	stencilWrite.StencilReadMask = 0xff;
-	stencilWrite.StencilWriteMask = 0xff;
-	stencilWrite.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-	stencilWrite.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-	stencilWrite.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-	stencilWrite.FrontFace.StencilPassOp = D3D12_STENCIL_OP_INCR;
-	stencilWrite.BackFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-	stencilWrite.BackFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-	stencilWrite.BackFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-	stencilWrite.BackFace.StencilPassOp = D3D12_STENCIL_OP_INCR;
-
-	D3D12_RENDER_TARGET_BLEND_DESC depthComplexityBlend;
-	depthComplexityBlend.BlendEnable = true;
-	depthComplexityBlend.LogicOpEnable = false;
-	depthComplexityBlend.SrcBlend = D3D12_BLEND_ONE; // rgb混合
-	depthComplexityBlend.DestBlend = D3D12_BLEND_ONE; // rgb混合
-	depthComplexityBlend.BlendOp = D3D12_BLEND_OP_ADD; // Csrc * Fsrc + Cdest * Fdest
-	depthComplexityBlend.SrcBlendAlpha = D3D12_BLEND_ONE;
-	depthComplexityBlend.DestBlendAlpha = D3D12_BLEND_ZERO;
-	depthComplexityBlend.BlendOpAlpha = D3D12_BLEND_OP_ADD;// Asrc * Fsrc + Adest * Fdest
-	depthComplexityBlend.LogicOp = D3D12_LOGIC_OP_NOOP;
-	depthComplexityBlend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-	opaquePsoDesc.BlendState.RenderTarget[0] = depthComplexityBlend;
-	opaquePsoDesc.DepthStencilState = stencilWrite;
 	psos["opaque"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&psos["opaque"])));
 
@@ -881,7 +949,6 @@ void LandAndWavesApp::BuildPSO()
 	depthComplexity0.BackFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
 	depthComplexity0.BackFace.StencilFunc = D3D12_COMPARISON_FUNC_EQUAL;
 	
-
 	depthComplexityPsoDesc.BlendState = depthComplexityBlend1;
 	depthComplexityPsoDesc.DepthStencilState = depthComplexity0;
 	psos["depthComplexity0"] = nullptr;
@@ -932,7 +999,24 @@ void LandAndWavesApp::BuildPSO()
 	psos["alphaTested"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&alphaTestedPsoDesc, IID_PPV_ARGS(&psos["alphaTested"])));
 
-
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC treeBillboardPsoDesc = opaquePsoDesc;
+	treeBillboardPsoDesc.InputLayout = { treeBillboardInputLayoutDesc.data(), (UINT)treeBillboardInputLayoutDesc.size() };
+	treeBillboardPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["treeBillboardVS"]->GetBufferPointer()),
+		shaders["treeBillboardVS"]->GetBufferSize()
+	};
+	treeBillboardPsoDesc.GS = {
+		reinterpret_cast<BYTE*>(shaders["treeBillboardGS"]->GetBufferPointer()),
+		shaders["treeBillboardGS"]->GetBufferSize()
+	};
+	treeBillboardPsoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["treeBillboardPS"]->GetBufferPointer()),
+		shaders["treeBillboardPS"]->GetBufferSize()
+	};
+	treeBillboardPsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+	treeBillboardPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	psos["treeBillboard"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&treeBillboardPsoDesc, IID_PPV_ARGS(&psos["treeBillboard"])));
 }
 
 void LandAndWavesApp::BuildRenderItem()
@@ -974,9 +1058,22 @@ void LandAndWavesApp::BuildRenderItem()
 	boxRitem->startIndexLocation = boxRitem->geo->DrawArgs["box"].StartIndexLocation;
 	ritemLayer[(int)RenderLayer::AlphaTest].push_back(boxRitem.get());
 
+	auto treeBillboardRitem = std::make_unique<RenderItem>();
+	treeBillboardRitem->world = MathHelper::Identity4x4();
+	treeBillboardRitem->texTransform = MathHelper::Identity4x4();
+	treeBillboardRitem->objCBIndex = 3;
+	treeBillboardRitem->mat = materials["treeBillboard"].get();
+	treeBillboardRitem->geo = geometries["treeBillboardGeo"].get();
+	treeBillboardRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+	treeBillboardRitem->indexCount = treeBillboardRitem->geo->DrawArgs["treeBillboard"].IndexCount;
+	treeBillboardRitem->baseVertexLocation = treeBillboardRitem->geo->DrawArgs["treeBillboard"].BaseVertexLocation;
+	treeBillboardRitem->startIndexLocation = treeBillboardRitem->geo->DrawArgs["treeBillboard"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::TreeBillboardAlphaTest].push_back(treeBillboardRitem.get());
+
 	allRitems.push_back(std::move(landRitem));
 	allRitems.push_back(std::move(lakeRitem));
 	allRitems.push_back(std::move(boxRitem));
+	allRitems.push_back(std::move(treeBillboardRitem));
 
 	objCount = allRitems.size();
 }
