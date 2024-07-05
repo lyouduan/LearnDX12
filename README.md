@@ -1,3 +1,2 @@
-# One line of code A day
-## LearnDX12
+### One line of code A day
 record learning Directx12
