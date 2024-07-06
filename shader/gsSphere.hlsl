@@ -28,17 +28,6 @@ struct Material
     float3 FresnelR0;
     float Shininess;
 };
-
-Texture2DArray gTreeMapArray : register(t0); //所有漫反射贴图
-
-//6个不同类型的采样器
-SamplerState gSamPointWrap : register(s0);
-SamplerState gSamPointClamp : register(s1);
-SamplerState gSamLinearWarp : register(s2);
-SamplerState gSamLinearClamp : register(s3);
-SamplerState gSamAnisotropicWarp : register(s4);
-SamplerState gSamAnisotropicClamp : register(s5);
-
 cbuffer cbPerObject : register(b0)
 {
     float4x4 world;
@@ -49,21 +38,24 @@ cbuffer cbMatObject : register(b1)
     float4 gDiffuseAlbedo;
     float3 gFresnelR0;
     float gRoughness;
-    float4x4 gMatTransform;
 }
-cbuffer cbPassObject : register(b2)
+cbuffer cbPerObject : register(b2)
 {
     float4x4 viewProj;
     float3 gEyePosW;
     float gTotalTime;
     float4 gAmbientLight;
     Light gLights[MaxLights];
-    
-    float4 gFogColor;
-    float gFogStart;
-    float gFogRange;
-    
 }
+Texture2D gDiffuseMap : register(t0); //所有漫反射贴图
+//6个不同类型的采样器
+SamplerState gSamPointWrap : register(s0);
+SamplerState gSamPointClamp : register(s1);
+SamplerState gSamLinearWarp : register(s2);
+SamplerState gSamLinearClamp : register(s3);
+SamplerState gSamAnisotropicWarp : register(s4);
+SamplerState gSamAnisotropicClamp : register(s5);
+
 float CalcAttenuation(float d, float falloffStart, float falloffEnd);
 float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec);
 float3 BlinnPhong(float3 lightStrength, float3 lightVec, float3 normal, float3 toEye, Material mat);
@@ -75,110 +67,152 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
                        float3 shadowFactor);
 struct VertexIn
 {
-    float3 VertexW : POSITION;
-    float2 SizeW : SIZE;
+    float3 PosL : POSITION;
+    float3 Normal : NORMAL;
+    float2 Tex : TEXCOORD;
 };
 
 struct VertexOut
 {
-    float3 CenterPosW : POSITION;
-    float2 SizeW : SIZE;
+    float3 PosL : POSITION;
+    float3 Normal : NORMAL;
+    float2 Tex : TEXCOORD;
 };
 
 struct GeoOut
 {
     float4 PosH : SV_POSITION;
-    float3 PosW : POSITION;
-    float3 NormalW : NORMAL;
-    float2 TexCoord : TEXCOORD;
-    uint PrimID : SV_PrimitiveID;
+    float3 WorldPos : POSITION;
+    float3 WorldNormal : NORMAL;
+    float2 Tex : TEXCOORD;
 };
 
-VertexOut VS(VertexIn vin)
+VertexOut VSMain(VertexIn vin)
 {
     VertexOut vout;
 	
-    vout.CenterPosW = vin.VertexW;
-    vout.SizeW = vin.SizeW;
+	// Transform to homogeneous clip space.
+    vout.PosL = vin.PosL;
+
+    vout.Normal = vin.Normal;
     
+    vout.Tex = vin.Tex;
     return vout;
 }
 
-[maxvertexcount(4)]
-void GS(point VertexOut gin[1],
-    uint primID : SV_PrimitiveID,
-    inout TriangleStream<GeoOut> triStream)
+[maxvertexcount(2)]
+void GSMain2(point VertexOut gin[1],
+    inout LineStream< GeoOut> lineStream)
 {
-    // 
-    float3 up = float3(0.0, 1.0, 0.0);
-    float3 look = gEyePosW - gin[0].CenterPosW;
-    look.y = 0.0;
-    look = normalize(look);
-    float3 right = cross(up, look);
+    VertexOut geoOutVert[2];
+    float L = 1.0f;
+    geoOutVert[0].PosL = gin[0].PosL;
+    geoOutVert[1].PosL = geoOutVert[0].PosL + gin[0].Normal * L;
     
-    float halfWidth  = 0.5 * gin[0].SizeW.x;
-    float halfHeight = 0.5 * gin[0].SizeW.y;
+    geoOutVert[0].Normal = gin[0].Normal;
+    geoOutVert[1].Normal = geoOutVert[0].Normal;
     
-    float4 v[4];
-    v[0] = float4(gin[0].CenterPosW + right * halfWidth - up * halfHeight, 1.0f);
-    v[1] = float4(gin[0].CenterPosW + right * halfWidth + up * halfHeight, 1.0f);
-    v[2] = float4(gin[0].CenterPosW - right * halfWidth - up * halfHeight, 1.0f);
-    v[3] = float4(gin[0].CenterPosW - right * halfWidth + up * halfHeight, 1.0f);
-    
-    float2 texCoord[4] =
-    {
-        float2(0.0, 1.0),
-        float2(0.0, 0.0),
-        float2(1.0, 1.0),
-        float2(1.0, 0.0)
-    };
-
-    GeoOut geoOut;
+    GeoOut geoOut[2];
     [unroll]
-    for (uint i = 0; i < 4; i++)
+    for (uint i = 0; i < 2; i++)
     {
-        geoOut.PosH = mul(v[i], viewProj);
-        geoOut.PosW = v[i];
-        geoOut.NormalW = up;
-        geoOut.TexCoord = texCoord[i];
-        geoOut.PrimID = primID;
-        
-        triStream.Append(geoOut);
+        float4 PosW = mul(float4(geoOutVert[i].PosL, 1.0f), world);
+        geoOut[i].PosH = mul(PosW, viewProj);
+        lineStream.Append(geoOut[i]);
     }
-
+}
+float4 PSMain2(GeoOut pin) : SV_Target
+{
+    
+    return float4(0, 0, 1, 1);
 }
 
-float4 PS(GeoOut pin) : SV_Target
+[maxvertexcount(8)]
+void GSMain(triangle VertexOut gin[3],
+    inout TriangleStream<GeoOut> triStream)
 {
-    float3 uvw = float3(pin.TexCoord, pin.PrimID % 3);
-    float4 diffuseAlbedo = gTreeMapArray.Sample(gSamAnisotropicWarp, uvw) * gDiffuseAlbedo;
-    
-#ifdef ALPHA_TEST
-    // discard the alpha less than 0.1, this operation could speed up the shader process
-    clip(diffuseAlbedo.a - 0.1f);
-#endif
-    
-    float3 worldNormal = normalize(pin.NormalW);
-    float3 toEyeW = gEyePosW - pin.PosW;
-    float distToEye = length(toEyeW);
-    toEyeW /= distToEye; // normalize
-    
+    if (true)
+    {
+        VertexOut m[3];
+        m[0].PosL = (gin[0].PosL + gin[1].PosL) * 0.5;
+        m[1].PosL = (gin[1].PosL + gin[2].PosL) * 0.5;
+        m[2].PosL = (gin[0].PosL + gin[2].PosL) * 0.5;
+        
+        m[0].PosL = normalize(m[0].PosL);
+        m[1].PosL = normalize(m[1].PosL);
+        m[2].PosL = normalize(m[2].PosL);
+        
+        m[0].Normal = m[0].PosL;
+        m[1].Normal = m[1].PosL;
+        m[2].Normal = m[2].PosL;
+        
+        m[0].Tex = 0.5 * (gin[0].Tex + gin[1].Tex);
+        m[1].Tex = 0.5 * (gin[1].Tex + gin[2].Tex);
+        m[2].Tex = 0.5 * (gin[2].Tex + gin[0].Tex);
+        
+        VertexOut geoOutVertex[6];
+        geoOutVertex[0] = gin[0];
+        geoOutVertex[1] = m[0];
+        geoOutVertex[2] = m[2];
+        geoOutVertex[3] = m[1];
+        geoOutVertex[4] = gin[2];
+        geoOutVertex[5] = gin[1];
+        
+        GeoOut geoOut[6];
+        [unroll]
+        for (uint i = 0; i < 6; i++)
+        {
+            geoOut[i].WorldPos = mul(float4(geoOutVertex[i].PosL, 1.0f), world);
+            geoOut[i].PosH = mul(float4(geoOut[i].WorldPos, 1.0f), viewProj);
+            geoOut[i].WorldNormal = mul(geoOutVertex[i].Normal, (float3x3)world);
+            geoOut[i].Tex = geoOutVertex[i].Tex;
+        }
+        [unroll]
+        for (uint j = 0; j < 5; j++)
+        {
+            triStream.Append(geoOut[j]);
+        }
+        triStream.RestartStrip();
+        triStream.Append(geoOut[1]);
+        triStream.Append(geoOut[5]);
+        triStream.Append(geoOut[3]);
+    }
+    if(!true)
+    {
+       //float3 triangleNormal = gin[0].Normal + gin[1].Normal + gin[2].Normal;
+       //float p = 0.5f;
+       //gin[0].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       //gin[1].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       //gin[2].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       //GeoOut geoOut[3];
+       //[unroll]
+       //for (uint i = 0; i < 3; i++)
+       //{
+       //    geoOut[i].WorldPos = mul(float4(gin[i].PosL, 1.0f), world);
+       //    geoOut[i].PosH = mul(float4(geoOut[i].WorldPos, 1.0f), viewProj);
+       //    geoOut[i].WorldNormal = mul(gin[i].Normal, (float3x3) world);
+       //    geoOut[i].Tex = gin[i].Tex;
+       //    triStream.Append(geoOut[i]);
+       //}
+    }
+   
+}
+
+float4 PSMain(GeoOut pin) : SV_Target
+{
+    float4 diffuseAlbedo = gDiffuseMap.Sample(gSamAnisotropicWarp, pin.Tex) * gDiffuseAlbedo;
+    pin.WorldNormal = normalize(pin.WorldNormal);
+    float3 toEyeW = normalize(gEyePosW - pin.WorldPos);
     
     float4 ambient = gAmbientLight * diffuseAlbedo;
     
     Material mat = { diffuseAlbedo, gFresnelR0, gRoughness };
     float3 shadowFactor = 1.0f;
-    float4 directLight = ComputeLighting(gLights, mat, pin.PosW,
-        pin.NormalW, toEyeW, shadowFactor);
+    float4 directLight = ComputeLighting(gLights, mat, pin.WorldPos,
+        pin.WorldNormal, toEyeW, shadowFactor);
     
     float4 litColor = ambient + directLight;
-    
-#ifdef FOG
-    float s = saturate((distToEye - gFogStart) / gFogRange);
-    litColor = lerp(litColor, gFogColor, s);
-#endif
-    
-    litColor.a = diffuseAlbedo.a * 0.3f;
+    litColor.a = diffuseAlbedo.a;
     
     return litColor;
 }
@@ -318,7 +352,7 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
 #endif
 
 #if (NUM_SPOT_LIGHTS > 0)
-    for(i = NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; ++i)
+    for (i = NUM_DIR_LIGHTS + NUM_POINT_LIGHTS; i < NUM_DIR_LIGHTS + NUM_POINT_LIGHTS + NUM_SPOT_LIGHTS; ++i)
     {
         result += ComputeSpotLight(gLights[i], mat, pos, normal, toEye);
     }

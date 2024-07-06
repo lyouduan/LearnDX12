@@ -651,3 +651,44 @@ GeometryGenerator::MeshData GeometryGenerator::CreateQuad(float x, float y, floa
 
 	return meshData;
 }
+
+GeometryGenerator::MeshData GeometryGenerator::CreateGeoSphere20Face(float radius)
+{
+	MeshData meshData;
+	const float X = 0.525731f;
+	const float Z = 0.850651f;
+
+	XMFLOAT3 pos[12] = {
+		XMFLOAT3(-X, 0.0f, Z),  XMFLOAT3(X, 0.0f, Z),
+		XMFLOAT3(-X, 0.0f, -Z), XMFLOAT3(X, 0.0f, -Z),
+		XMFLOAT3(0.0f, Z, X),   XMFLOAT3(0.0f, Z, -X),
+		XMFLOAT3(0.0f, -Z, X),  XMFLOAT3(0.0f, -Z, -X),
+		XMFLOAT3(Z, X, 0.0f),   XMFLOAT3(-Z, X, 0.0f),
+		XMFLOAT3(Z, -X, 0.0f),  XMFLOAT3(-Z, -X, 0.0f)
+	};
+
+	uint32 k[60] =
+	{
+		1,4,0,  4,9,0,  4,5,9,  8,5,4,  1,8,4,
+		1,10,8, 10,3,8, 8,3,5,  3,2,5,  3,7,2,
+		3,10,7, 10,6,7, 6,11,7, 6,0,11, 6,1,0,
+		10,1,6, 11,0,9, 2,11,9, 5,2,9,  11,2,7
+
+	};
+
+	meshData.Vertices.resize(12);
+	meshData.Indices32.assign(&k[0], &k[60]);
+
+	for (uint32 i = 0; i < 12; i++)
+	{
+		meshData.Vertices[i].Position = pos[i];
+		XMVECTOR vertNormal = XMVector3Normalize(DirectX::XMLoadFloat3(&meshData.Vertices[i].Position));
+		XMVECTOR vertPos = vertNormal * radius;
+
+		XMStoreFloat3(&meshData.Vertices[i].Normal, vertNormal);
+		XMStoreFloat3(&meshData.Vertices[i].Position, vertPos);
+		meshData.Vertices[i].TexC = XMFLOAT2(0.0f, 0.0f);
+	}
+
+	return meshData;
+}

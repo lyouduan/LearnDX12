@@ -77,15 +77,14 @@ void D3D12InitApp::Draw()
 	auto passCB = mCurrFrameResource->passCB->Resource();
 	cmdList->SetGraphicsRootConstantBufferView(3, passCB->GetGPUVirtualAddress());
 
-	//cmdList->IASetVertexBuffers(0, 1, &vertexView);
-	//cmdList->IASetIndexBuffer(&indexView);
-	//cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	//cmdList->DrawIndexedInstanced(DrawArgs["box"].IndexCount, 1, DrawArgs["box"].StartIndexLocation, DrawArgs["box"].BaseVertexLocation, 0);
-	//cmdList->DrawIndexedInstanced(DrawArgs["grid"].IndexCount, 1, DrawArgs["grid"].StartIndexLocation, DrawArgs["grid"].BaseVertexLocation, 0);
-	//cmdList->DrawIndexedInstanced(DrawArgs["sphere"].IndexCount, 1, DrawArgs["sphere"].StartIndexLocation, DrawArgs["sphere"].BaseVertexLocation, 0);
-	//cmdList->DrawIndexedInstanced(DrawArgs["cylinder"].IndexCount, 1, DrawArgs["cylinder"].StartIndexLocation, DrawArgs["cylinder"].BaseVertexLocation, 0);
+	cmdList->SetPipelineState(psos["opaque"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
 
-	DrawRenderItems();
+	cmdList->SetPipelineState(psos["gsSphere"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::geoSphere]);
+
+	cmdList->SetPipelineState(psos["gsSphere2"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::geoSpherePoint]);
 
 	auto trans2 = CD3DX12_RESOURCE_BARRIER::Transition(swapChainBuffer[ref_mCurrentBackBuffer].Get(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -420,7 +419,7 @@ void D3D12InitApp::BuildDescriptorHeaps()
 	ThrowIfFailed(device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&cbvHeap)));
 
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-	srvHeapDesc.NumDescriptors = 4; // (objCB + passCB) * frameCounts
+	srvHeapDesc.NumDescriptors = 4; 
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	srvHeapDesc.NodeMask = 0;
@@ -560,14 +559,21 @@ void D3D12InitApp::BuildShadersAndInputLayout()
 		  { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
-#if defined(_DEBUG)
-	UINT compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#else
-	UINT compileFlags = 0;
-#endif
+	shaders["opaqueVS"] = CompileShader(std::wstring(L"shader/column.hlsl").c_str(), nullptr, "VSMain", "vs_5_0");
+	shaders["opaquePS"] = CompileShader(std::wstring(L"shader/column.hlsl").c_str(), nullptr, "PSMain", "ps_5_0");
 
-	ThrowIfFailed(D3DCompileFromFile(std::wstring(L"shader/column.hlsl").c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr));
-	ThrowIfFailed(D3DCompileFromFile(std::wstring(L"shader/column.hlsl").c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr));
+	gsInputLayoutDesc =
+	{
+		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		  { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		  { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+	shaders["gsVS"] = CompileShader(std::wstring(L"shader/gsSphere.hlsl").c_str(), nullptr, "VSMain", "vs_5_0");
+	shaders["gsGS"] = CompileShader(std::wstring(L"shader/gsSphere.hlsl").c_str(), nullptr, "GSMain", "gs_5_0");
+	shaders["gsPS"] = CompileShader(std::wstring(L"shader/gsSphere.hlsl").c_str(), nullptr, "PSMain", "ps_5_0");
+	
+	shaders["gsGSPoint"] = CompileShader(std::wstring(L"shader/gsSphere.hlsl").c_str(), nullptr, "GSMain2", "gs_5_0");
+	shaders["gsPSPoint"] = CompileShader(std::wstring(L"shader/gsSphere.hlsl").c_str(), nullptr, "PSMain2", "ps_5_0");
 
 }
 
@@ -579,6 +585,7 @@ void D3D12InitApp::BuildShapeGeometry()
 	GeometryGenerator::MeshData sphere = geoGen.CreateSphere(0.5f, 20, 20);
 	//GeometryGenerator::MeshData sphere = geoGen.CreateGeosphere(0.5f, 3);
 	GeometryGenerator::MeshData cylinder = geoGen.CreateCylinder(0.5f, 0.3f, 3.0f, 20, 20);
+	GeometryGenerator::MeshData gsSpehre = geoGen.CreateGeoSphere20Face(0.8f);
 
 	// concatenate all the geometry into one big vertex/index buffer
 	// **********************
@@ -588,12 +595,14 @@ void D3D12InitApp::BuildShapeGeometry()
 	UINT gridVertexOffset = (UINT)box.Vertices.size();
 	UINT sphereVertexOffset = gridVertexOffset + (UINT)grid.Vertices.size();
 	UINT cylinderVertexOffset = sphereVertexOffset + (UINT)sphere.Vertices.size();
+	UINT gsSpehreVertexOffset = cylinderVertexOffset + (UINT)cylinder.Vertices.size();
 
 	// the index offset to each object
 	UINT boxIndexOffset = 0;
 	UINT gridIndexOffset = (UINT)box.Indices32.size();
 	UINT sphereIndexOffset = gridIndexOffset + (UINT)grid.Indices32.size();
 	UINT cylinderIndexOffset = sphereIndexOffset + (UINT)sphere.Indices32.size();
+	UINT gsSpehreIndexOffset = cylinderIndexOffset + (UINT)cylinder.Indices32.size();
 
 	//
 	SubmeshGeometry boxSubmesh;
@@ -616,11 +625,17 @@ void D3D12InitApp::BuildShapeGeometry()
 	cylinderSubmesh.StartIndexLocation = cylinderIndexOffset;
 	cylinderSubmesh.BaseVertexLocation = cylinderVertexOffset;
 
+	SubmeshGeometry gsSpehreSubmesh;
+	gsSpehreSubmesh.IndexCount = (UINT)gsSpehre.Indices32.size();
+	gsSpehreSubmesh.StartIndexLocation = gsSpehreIndexOffset;
+	gsSpehreSubmesh.BaseVertexLocation = gsSpehreVertexOffset;
+
 	auto totalVertexCount =
 		box.Vertices.size() +
 		grid.Vertices.size() +
 		sphere.Vertices.size() +
-		cylinder.Vertices.size();
+		cylinder.Vertices.size() + 
+		gsSpehre.Vertices.size();
 
 	std::vector<Vertex> vertices(totalVertexCount);
 
@@ -630,8 +645,6 @@ void D3D12InitApp::BuildShapeGeometry()
 		vertices[k].Pos = box.Vertices[i].Position;
 		vertices[k].Normal = box.Vertices[i].Normal;
 		vertices[k].Tex = box.Vertices[i].TexC;
-
-
 	}
 	for (size_t i = 0; i < grid.Vertices.size(); ++i, ++k)
 	{
@@ -652,12 +665,19 @@ void D3D12InitApp::BuildShapeGeometry()
 		vertices[k].Normal = cylinder.Vertices[i].Normal;
 		vertices[k].Tex = cylinder.Vertices[i].TexC;
 	}
+	for (size_t i = 0; i < gsSpehre.Vertices.size(); ++i, ++k)
+	{
+		vertices[k].Pos = gsSpehre.Vertices[i].Position;
+		vertices[k].Normal = gsSpehre.Vertices[i].Normal;
+		vertices[k].Tex = gsSpehre.Vertices[i].TexC;
+	}
 
 	std::vector<std::uint16_t> indices;
 	indices.insert(indices.end(), std::begin(box.GetIndices16()), std::end(box.GetIndices16()));
 	indices.insert(indices.end(), std::begin(grid.GetIndices16()), std::end(grid.GetIndices16()));
 	indices.insert(indices.end(), std::begin(sphere.GetIndices16()), std::end(sphere.GetIndices16()));
 	indices.insert(indices.end(), std::begin(cylinder.GetIndices16()), std::end(cylinder.GetIndices16()));
+	indices.insert(indices.end(), std::begin(gsSpehre.GetIndices16()), std::end(gsSpehre.GetIndices16()));
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
@@ -676,9 +696,11 @@ void D3D12InitApp::BuildShapeGeometry()
 	geo->DrawArgs["grid"] = gridSubmesh;
 	geo->DrawArgs["sphere"] = sphereSubmesh;
 	geo->DrawArgs["cylinder"] = cylinderSubmesh;
+	geo->DrawArgs["gsSpehre"] = gsSpehreSubmesh;
 
 	geometries["shapeGeo"] = std::move(geo);
 }
+
 
 void D3D12InitApp::BuildMaterials()
 {
@@ -713,20 +735,20 @@ void D3D12InitApp::BuildMaterials()
 	box->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	box->fresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
 	box->roughness = 0.2f;
-	//auto skull = std::make_unique<Material>();
-	//skull->name = "skull";
-	//skull->matCBIndex = 4;
-	//skull->diffuseSrvHeapIndex = 4;
-	//skull->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	//skull->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-	//skull->roughness = 0.3f;
 
+	auto skull = std::make_unique<Material>();
+	skull->name = "skull";
+	skull->matCBIndex = 4;
+	skull->diffuseSrvHeapIndex = 1;
+	skull->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	skull->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+	skull->roughness = 0.3f;
 
 	materials[grid->name] = std::move(grid);
 	materials[sphere->name] = std::move(sphere);
 	materials[cylinder->name] = std::move(cylinder);
 	materials[box->name] = std::move(box);
-	//materials[skull->name] = std::move(skull);
+	materials[skull->name] = std::move(skull);
 
 	matCount = materials.size();
 }
@@ -798,8 +820,14 @@ void D3D12InitApp::BuildPSO()
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.InputLayout = { inputLayoutDesc.data(), (unsigned int)inputLayoutDesc.size() };
 	psoDesc.pRootSignature = rootSignature.Get();
-	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+	psoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["opaqueVS"]->GetBufferPointer()),
+		shaders["opaqueVS"]->GetBufferSize()
+	};
+	psoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["opaquePS"]->GetBufferPointer()),
+		shaders["opaquePS"]->GetBufferSize()
+	};
 	CD3DX12_RASTERIZER_DESC Raster(D3D12_DEFAULT);
 	//Raster.FillMode = D3D12_FILL_MODE_WIREFRAME;
 	//Raster.CullMode = D3D12_CULL_MODE_BACK;
@@ -813,13 +841,46 @@ void D3D12InitApp::BuildPSO()
 	psoDesc.SampleDesc.Count = 1;
 	psoDesc.SampleDesc.Quality = 0;
 	psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineState)));
+	psos["opaque"] = nullptr;
 
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psos["opaque"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC gsPsoDesc = psoDesc;
+	psoDesc.InputLayout = { gsInputLayoutDesc.data(), (unsigned int)gsInputLayoutDesc.size() };
+	gsPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["gsVS"]->GetBufferPointer()),
+		shaders["gsVS"]->GetBufferSize()
+	};
+	gsPsoDesc.GS = {
+		reinterpret_cast<BYTE*>(shaders["gsGS"]->GetBufferPointer()),
+		shaders["gsGS"]->GetBufferSize()
+	};
+	gsPsoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["gsPS"]->GetBufferPointer()),
+		shaders["gsPS"]->GetBufferSize()
+	};
+	Raster.FillMode = D3D12_FILL_MODE_WIREFRAME;
+	Raster.CullMode = D3D12_CULL_MODE_NONE;
+	gsPsoDesc.RasterizerState = Raster;
+	psos["gsSphere"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&gsPsoDesc, IID_PPV_ARGS(&psos["gsSphere"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC gsPsoDesc2 = gsPsoDesc;
+	gsPsoDesc2.GS = {
+		reinterpret_cast<BYTE*>(shaders["gsGSPoint"]->GetBufferPointer()),
+		shaders["gsGSPoint"]->GetBufferSize()
+	};
+	gsPsoDesc2.PS = {
+		reinterpret_cast<BYTE*>(shaders["gsPSPoint"]->GetBufferPointer()),
+		shaders["gsPSPoint"]->GetBufferSize()
+	};
+	gsPsoDesc2.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+	psos["gsSphere2"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&gsPsoDesc2, IID_PPV_ARGS(&psos["gsSphere2"])));
 }
 
 void D3D12InitApp::BuildRenderItem()
 {
-
 	auto boxRitem = std::make_unique<RenderItem>();
 	XMStoreFloat4x4(&boxRitem->world, XMMatrixScaling(2.0f, 2.0f, 2.0f) * XMMatrixTranslation(0.0f, 0.5f, 0.0f));
 	XMStoreFloat4x4(&boxRitem->texTransform, XMMatrixScaling(1.0f, 1.f, 1.0f));
@@ -831,6 +892,7 @@ void D3D12InitApp::BuildRenderItem()
 	boxRitem->indexCount = boxRitem->geo->DrawArgs["box"].IndexCount;
 	boxRitem->baseVertexLocation = boxRitem->geo->DrawArgs["box"].BaseVertexLocation;
 	boxRitem->startIndexLocation = boxRitem->geo->DrawArgs["box"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::Opaque].push_back(boxRitem.get());
 	allRitems.push_back(std::move(boxRitem));
 
 	auto gridRitem = std::make_unique<RenderItem>();
@@ -844,6 +906,7 @@ void D3D12InitApp::BuildRenderItem()
 	gridRitem->indexCount = gridRitem->geo->DrawArgs["grid"].IndexCount;
 	gridRitem->baseVertexLocation = gridRitem->geo->DrawArgs["grid"].BaseVertexLocation;
 	gridRitem->startIndexLocation = gridRitem->geo->DrawArgs["grid"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::Opaque].push_back(gridRitem.get());
 	allRitems.push_back(std::move(gridRitem));
 
 	//auto skullRitem = std::make_unique<RenderItem>();
@@ -858,7 +921,27 @@ void D3D12InitApp::BuildRenderItem()
 	//skullRitem->startIndexLocation = skullRitem->geo->DrawArgs["skull"].StartIndexLocation;
 	//allRitems.push_back(std::move(skullRitem));
 
-	UINT objCBIndex = 2;
+	auto gsSpehreRitem = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&gsSpehreRitem->world, XMMatrixScaling(1.5f, 1.5f, 1.5f) * XMMatrixTranslation(0.0f, 3.0f, 0.0f));
+	gsSpehreRitem->NumFramesDirty = gNumFrameResources;
+	gsSpehreRitem->objCBIndex = 2; //skull常量数据（world矩阵）在objConstantBuffer索引1上
+	gsSpehreRitem->mat = materials["skull"].get();
+	gsSpehreRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	gsSpehreRitem->geo = geometries["shapeGeo"].get();
+	gsSpehreRitem->indexCount = gsSpehreRitem->geo->DrawArgs["gsSpehre"].IndexCount;
+	gsSpehreRitem->baseVertexLocation = gsSpehreRitem->geo->DrawArgs["gsSpehre"].BaseVertexLocation;
+	gsSpehreRitem->startIndexLocation = gsSpehreRitem->geo->DrawArgs["gsSpehre"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::geoSphere].push_back(gsSpehreRitem.get());
+
+	auto gsSpehreRitem2 = std::make_unique<RenderItem>();
+	*gsSpehreRitem2 = *gsSpehreRitem;
+	gsSpehreRitem2->primitiveType = D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+	ritemLayer[(int)RenderLayer::geoSpherePoint].push_back(gsSpehreRitem2.get());
+
+	allRitems.push_back(std::move(gsSpehreRitem));
+	allRitems.push_back(std::move(gsSpehreRitem2));
+
+	UINT objCBIndex = 4;
 	for (int i = 0; i < 5; i++) {
 		auto leftCylRitem = std::make_unique<RenderItem>();
 		auto rightCylRitem = std::make_unique<RenderItem>();
@@ -913,24 +996,22 @@ void D3D12InitApp::BuildRenderItem()
 		rightSphereRitem->indexCount = rightSphereRitem->geo->DrawArgs["sphere"].IndexCount;
 		rightSphereRitem->baseVertexLocation = rightSphereRitem->geo->DrawArgs["sphere"].BaseVertexLocation;
 		rightSphereRitem->startIndexLocation = rightSphereRitem->geo->DrawArgs["sphere"].StartIndexLocation;
+
+		ritemLayer[(int)RenderLayer::Opaque].push_back(leftCylRitem.get());
+		ritemLayer[(int)RenderLayer::Opaque].push_back(rightCylRitem.get());
+		ritemLayer[(int)RenderLayer::Opaque].push_back(leftSphereRitem.get());
+		ritemLayer[(int)RenderLayer::Opaque].push_back(rightSphereRitem.get());
 		allRitems.push_back(std::move(leftCylRitem));
 		allRitems.push_back(std::move(rightCylRitem));
 		allRitems.push_back(std::move(leftSphereRitem));
 		allRitems.push_back(std::move(rightSphereRitem));
 		
 	}
-
 	objCount = allRitems.size();
 }
 
-void D3D12InitApp::DrawRenderItems()
+void D3D12InitApp::DrawRenderItems(std::vector<RenderItem*> ritems)
 {
-
-	//将智能指针数组转换成普通指针数组
-	std::vector<RenderItem*> ritems;
-	for (auto& e : allRitems)
-		ritems.push_back(e.get());
-
 	auto objCBByteSize = CalcConstantBufferByteSize<ObjectConstants>();
 	auto matCBByteSize = CalcConstantBufferByteSize<MatConstants>();
 	auto objCB = mCurrFrameResource->objCB->Resource();

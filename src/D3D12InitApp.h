@@ -3,7 +3,15 @@
 using namespace DirectX::PackedVector;
 
 const int gNumFrameResources = 4;
-
+enum RenderLayer : int
+{
+	Opaque,
+	Transparent,
+	AlphaTest,
+	geoSphere,
+	geoSpherePoint,
+	Count
+};
 struct RenderItem
 {
 	RenderItem() = default;
@@ -55,18 +63,26 @@ private:
 	void BuildRootSignature();
 	void BuildShadersAndInputLayout();
 	void BuildShapeGeometry();
+
 	void BuildMaterials();
 	void BuildSkullGeometry();
 	void BuildRenderItem();
 	void BuildPSO();
-	void DrawRenderItems();
+	void DrawRenderItems(std::vector<RenderItem*>);
 	void BuildFrameResources();
 protected:
 	ComPtr<ID3D12RootSignature> rootSignature;
 	ComPtr<ID3D12PipelineState> pipelineState;
 	std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayoutDesc;
+	std::vector<D3D12_INPUT_ELEMENT_DESC> gsInputLayoutDesc;
+
 	ComPtr<ID3DBlob> vertexShader;
 	ComPtr<ID3DBlob> pixelShader;
+
+	std::vector<RenderItem*> ritemLayer[(int)RenderLayer::Count];
+
+	std::unordered_map<std::string, ComPtr<ID3DBlob>> shaders;
+	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> psos;
 
 	std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> geometries;
 	std::unordered_map<std::string, std::unique_ptr<Material>> materials;
