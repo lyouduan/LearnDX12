@@ -101,15 +101,15 @@ VertexOut VSMain(VertexIn vin)
 }
 
 [maxvertexcount(2)]
-void GSMain2(point VertexOut gin[1],
+void GSMain2(triangle VertexOut gin[3],
     inout LineStream< GeoOut> lineStream)
 {
     VertexOut geoOutVert[2];
     float L = 1.0f;
-    geoOutVert[0].PosL = gin[0].PosL;
-    geoOutVert[1].PosL = geoOutVert[0].PosL + gin[0].Normal * L;
+    geoOutVert[0].PosL = (gin[0].PosL + gin[1].PosL + gin[2].PosL) / 3;
+    geoOutVert[0].Normal = gin[0].Normal + gin[1].Normal + gin[2].Normal;
     
-    geoOutVert[0].Normal = gin[0].Normal;
+    geoOutVert[1].PosL = geoOutVert[0].PosL + gin[0].Normal * L;
     geoOutVert[1].Normal = geoOutVert[0].Normal;
     
     GeoOut geoOut[2];
@@ -131,7 +131,7 @@ float4 PSMain2(GeoOut pin) : SV_Target
 void GSMain(triangle VertexOut gin[3],
     inout TriangleStream<GeoOut> triStream)
 {
-    if (true)
+    if (!true)
     {
         VertexOut m[3];
         m[0].PosL = (gin[0].PosL + gin[1].PosL) * 0.5;
@@ -177,23 +177,23 @@ void GSMain(triangle VertexOut gin[3],
         triStream.Append(geoOut[5]);
         triStream.Append(geoOut[3]);
     }
-    if(!true)
+    if(true)
     {
-       //float3 triangleNormal = gin[0].Normal + gin[1].Normal + gin[2].Normal;
-       //float p = 0.5f;
-       //gin[0].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
-       //gin[1].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
-       //gin[2].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
-       //GeoOut geoOut[3];
-       //[unroll]
-       //for (uint i = 0; i < 3; i++)
-       //{
-       //    geoOut[i].WorldPos = mul(float4(gin[i].PosL, 1.0f), world);
-       //    geoOut[i].PosH = mul(float4(geoOut[i].WorldPos, 1.0f), viewProj);
-       //    geoOut[i].WorldNormal = mul(gin[i].Normal, (float3x3) world);
-       //    geoOut[i].Tex = gin[i].Tex;
-       //    triStream.Append(geoOut[i]);
-       //}
+       float3 triangleNormal = gin[0].Normal + gin[1].Normal + gin[2].Normal;
+       float p = 0.0f;
+       gin[0].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       gin[1].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       gin[2].PosL += triangleNormal * p * (sin(gTotalTime) + 1);
+       GeoOut geoOut[3];
+       [unroll]
+       for (uint i = 0; i < 3; i++)
+       {
+           geoOut[i].WorldPos = mul(float4(gin[i].PosL, 1.0f), world);
+           geoOut[i].PosH = mul(float4(geoOut[i].WorldPos, 1.0f), viewProj);
+           geoOut[i].WorldNormal = mul(gin[i].Normal, (float3x3) world);
+           geoOut[i].Tex = gin[i].Tex;
+           triStream.Append(geoOut[i]);
+       }
     }
    
 }

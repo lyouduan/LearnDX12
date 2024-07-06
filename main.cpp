@@ -1,6 +1,6 @@
 #include "./src/stdafx.h"
 
-#define D3D12
+#define Land
 
 #ifdef Stencil
 #include "./src/StencilApp.h"

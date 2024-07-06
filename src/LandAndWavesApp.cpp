@@ -1113,6 +1113,17 @@ void LandAndWavesApp::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 		matCBAddres += ritem->mat->matCBIndex * matCBByteSize;
 		cmdList->SetGraphicsRootConstantBufferView(2, matCBAddres);
 
+
+		//if (ritem->geo->name == "treeBillboardGeo")
+		//{
+		//	cmdList->DrawInstanced(4, 1, 0, 0);
+		//	cmdList->DrawInstanced(4, 1, 4, 0);
+		//	cmdList->DrawInstanced(4, 1, 8, 0);
+		//	cmdList->DrawInstanced(4, 1, 12, 0);
+		//}
+		//else
+
+		
 		//绘制顶点（通过索引缓冲区绘制）
 		cmdList->DrawIndexedInstanced(ritem->indexCount, //每个实例要绘制的索引数
 			1,	//实例化个数

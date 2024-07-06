@@ -1136,12 +1136,15 @@ void StencilApp::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 		matCBAddres += ritem->mat->matCBIndex * matCBByteSize;
 		cmdList->SetGraphicsRootConstantBufferView(2, matCBAddres);
 
-		//绘制顶点（通过索引缓冲区绘制）
+		
+			//绘制顶点（通过索引缓冲区绘制）
 		cmdList->DrawIndexedInstanced(ritem->indexCount, //每个实例要绘制的索引数
 			1,	//实例化个数
 			ritem->startIndexLocation,	//起始索引位置
 			ritem->baseVertexLocation,	//子物体起始索引在全局索引中的位置
 			0);	//实例化的高级技术，暂时设置为0
+		
+		
 	}
 }
 

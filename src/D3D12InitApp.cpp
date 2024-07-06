@@ -874,7 +874,7 @@ void D3D12InitApp::BuildPSO()
 		reinterpret_cast<BYTE*>(shaders["gsPSPoint"]->GetBufferPointer()),
 		shaders["gsPSPoint"]->GetBufferSize()
 	};
-	gsPsoDesc2.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+	gsPsoDesc2.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	psos["gsSphere2"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&gsPsoDesc2, IID_PPV_ARGS(&psos["gsSphere2"])));
 }
@@ -935,7 +935,7 @@ void D3D12InitApp::BuildRenderItem()
 
 	auto gsSpehreRitem2 = std::make_unique<RenderItem>();
 	*gsSpehreRitem2 = *gsSpehreRitem;
-	gsSpehreRitem2->primitiveType = D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+	gsSpehreRitem2->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 	ritemLayer[(int)RenderLayer::geoSpherePoint].push_back(gsSpehreRitem2.get());
 
 	allRitems.push_back(std::move(gsSpehreRitem));
