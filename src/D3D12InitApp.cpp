@@ -824,6 +824,7 @@ void D3D12InitApp::BuildPSO()
 		reinterpret_cast<BYTE*>(shaders["opaqueVS"]->GetBufferPointer()),
 		shaders["opaqueVS"]->GetBufferSize()
 	};
+	
 	psoDesc.PS = {
 		reinterpret_cast<BYTE*>(shaders["opaquePS"]->GetBufferPointer()),
 		shaders["opaquePS"]->GetBufferSize()

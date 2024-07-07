@@ -1,6 +1,6 @@
 #include "./src/stdafx.h"
 
-#define Land
+#define CS
 
 #ifdef Stencil
 #include "./src/StencilApp.h"
@@ -15,6 +15,11 @@
 #ifdef Land
 #include "./src/LandAndWavesApp.h"
 #define APP LandAndWavesApp
+#endif // 
+
+#ifdef CS
+#include "./src/GaussianBlur.h"
+#define APP GaussianBlur
 #endif // 
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int nShowCmd)
