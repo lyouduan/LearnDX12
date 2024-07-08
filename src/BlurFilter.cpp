@@ -89,7 +89,6 @@ void BlurFilter::Execute(ID3D12GraphicsCommandList* cmdList, ID3D12RootSignature
 		// ºáÏòÄ£ºý
 		////////
 		cmdList->SetPipelineState(horzBlurPso);
-
 		cmdList->SetComputeRootDescriptorTable(1, mBlur0GpuSrv);
 		cmdList->SetComputeRootDescriptorTable(2, mBlur1GpuUav);
 
@@ -178,15 +177,14 @@ void BlurFilter::BuildDescriptors()
 	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
 	D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-
 	uavDesc.Format = mFormat;
 	uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 	uavDesc.Texture2D.MipSlice = 0;
 
 	mDevice->CreateShaderResourceView(mBlurMap0.Get(), &srvDesc, mBlur0CpuSrv);
-	mDevice->CreateShaderResourceView(mBlurMap1.Get(), &srvDesc, mBlur1CpuSrv);
-
 	mDevice->CreateUnorderedAccessView(mBlurMap0.Get(), nullptr, &uavDesc, mBlur0CpuUav);
+
+	mDevice->CreateShaderResourceView(mBlurMap1.Get(), &srvDesc, mBlur1CpuSrv);
 	mDevice->CreateUnorderedAccessView(mBlurMap1.Get(), nullptr, &uavDesc, mBlur1CpuUav);
 
 }

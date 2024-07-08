@@ -51,6 +51,12 @@
     <ClCompile Include="src\BlurFilter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\TessellationApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\BasicTess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\d3dx12.h">
@@ -101,6 +107,12 @@
     <ClInclude Include="src\BlurFilter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\TessellationApp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\BasicTess.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl" />
@@ -110,6 +122,7 @@
     <None Include="shader\treeBillboard.hlsl" />
     <None Include="shader\gsSphere.hlsl" />
     <None Include="shader\gaussion.hlsl" />
+    <None Include="shader\Tessellation.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />

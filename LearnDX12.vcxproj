@@ -131,6 +131,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\BasicTess.cpp" />
     <ClCompile Include="src\BlurFilter.cpp" />
     <ClCompile Include="src\GaussianBlur.cpp" />
     <ClCompile Include="src\DDSTextureLoader.cpp" />
@@ -143,8 +144,10 @@
     <ClCompile Include="src\D3DApp.cpp" />
     <ClCompile Include="src\Wave.cpp" />
     <ClCompile Include="src\StencilApp.cpp" />
+    <ClCompile Include="src\TessellationApp.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\BasicTess.h" />
     <ClInclude Include="src\BlurFilter.h" />
     <ClInclude Include="src\GaussianBlur.h" />
     <ClInclude Include="src\DDSTextureLoader.h" />
@@ -161,6 +164,7 @@
     <ClInclude Include="src\UploadBuffer.h" />
     <ClInclude Include="src\Wave.h" />
     <ClInclude Include="src\StencilApp.h" />
+    <ClInclude Include="src\TessellationApp.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl">
@@ -233,6 +237,19 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\gaussion.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4.0</ShaderModel>
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shader\Tessellation.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>

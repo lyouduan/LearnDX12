@@ -1,31 +1,26 @@
-#include "GaussianBlur.h"
+#include "BasicTess.h"
 
-GaussianBlur::GaussianBlur()
+BasicTess::BasicTess()
 {
 }
 
-GaussianBlur::~GaussianBlur()
+BasicTess::~BasicTess()
 {
 }
 
-bool GaussianBlur::Init(HINSTANCE hInstance, int nShowCmd)
+bool BasicTess::Init(HINSTANCE hInstance, int nShowCmd)
 {
 	if (!D3DApp::Init(hInstance, nShowCmd))
 		return false;
 	ThrowIfFailed(cmdList->Reset(cmdAllocator.Get(), nullptr));
 
-	mWaves = std::make_unique<Waves>(128, 128, 1.0f, 0.03f, 4.0f, 0.2f);
-	mBlurFilter = std::make_unique<BlurFilter>(device.Get(), width, height, DXGI_FORMAT_R8G8B8A8_UNORM);
 
 	LoadTextures();
 	BuildRootSignature();
-	BuildPostProcessRootSignature();
 	BuildShadersAndInputLayout();
-	BuildShapeGeometry();
-	BuildBoxGeometry();
+	BuildQuadPatchGeometry();
+
 	BuildMaterials();
-	BuildWavesGeometryBuffers();
-	BuildTreeBillboardGeometry();
 
 	BuildRenderItem();
 	BuildFrameResources();
@@ -42,7 +37,7 @@ bool GaussianBlur::Init(HINSTANCE hInstance, int nShowCmd)
 	return true;
 }
 
-void GaussianBlur::Draw()
+void BasicTess::Draw()
 {
 	auto currCmdAllocator = mCurrFrameResource->cmdAllocator;
 	ThrowIfFailed(currCmdAllocator->Reset());
@@ -77,7 +72,6 @@ void GaussianBlur::Draw()
 
 	ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
 	cmdList->SetDescriptorHeaps(_countof(heaps), heaps);
-
 	cmdList->SetGraphicsRootSignature(rootSignature.Get());
 
 	auto passCB = mCurrFrameResource->passCB->Resource();
@@ -86,26 +80,8 @@ void GaussianBlur::Draw()
 	cmdList->SetPipelineState(psos["opaque"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
 
-	cmdList->SetPipelineState(psos["alphaTested"].Get());
-	DrawRenderItems(ritemLayer[(int)RenderLayer::AlphaTest]);
-
-	cmdList->SetPipelineState(psos["transparent"].Get());
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Transparent]);
-
-	mBlurFilter->Execute(cmdList.Get(), postProcessRootSignature.Get(),
-		psos["horzBlur"].Get(), psos["vertBlur"].Get(), swapChainBuffer[ref_mCurrentBackBuffer].Get(), 4);
-
-	cmdList->ResourceBarrier(
-		1,
-		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
-			swapChainBuffer[ref_mCurrentBackBuffer].Get(),
-			D3D12_RESOURCE_STATE_COPY_SOURCE,
-			D3D12_RESOURCE_STATE_COPY_DEST))
-	);
-	cmdList->CopyResource(swapChainBuffer[ref_mCurrentBackBuffer].Get(), mBlurFilter->Output());
-
 	auto trans2 = CD3DX12_RESOURCE_BARRIER::Transition(swapChainBuffer[ref_mCurrentBackBuffer].Get(),
-		D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	cmdList->ResourceBarrier(1, &trans2);//从渲染目标到呈现
 	ThrowIfFailed(cmdList->Close());
 
@@ -120,7 +96,7 @@ void GaussianBlur::Draw()
 	cmdQueue->Signal(fence.Get(), mCurrentFence);
 }
 
-void GaussianBlur::Update()
+void BasicTess::Update()
 {
 	OnKeyboardInput(gt);
 
@@ -135,41 +111,33 @@ void GaussianBlur::Update()
 		CloseHandle(eventHandle);
 	}
 
-
-	AnimateMaterials(gt);
 	UpdateObjectCBs();
 	UpdateMainPassCB();
 	UpdateMatCB();
-	UpdateWaves(gt);
 
 }
 
-void GaussianBlur::OnResize()
+void BasicTess::OnResize()
 {
 	D3DApp::OnResize();
 	//构建投影矩阵
 	XMMATRIX p = XMMatrixPerspectiveFovLH(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
 	XMStoreFloat4x4(&mProj, p);
-
-	if (mBlurFilter != nullptr)
-	{
-		mBlurFilter->OnResize((UINT)width, (UINT)height);
-	}
 }
 
-void GaussianBlur::OnMouseDown(WPARAM btnState, int x, int y)
+void BasicTess::OnMouseDown(WPARAM btnState, int x, int y)
 {
 	lastMousePos.x = x;
 	lastMousePos.y = y;
 	SetCapture(mhMainWnd);
 }
 
-void GaussianBlur::OnMouseUp(WPARAM btnState, int x, int y)
+void BasicTess::OnMouseUp(WPARAM btnState, int x, int y)
 {
 	ReleaseCapture();
 }
 
-void GaussianBlur::OnMouseMove(WPARAM btnState, int x, int y)
+void BasicTess::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
@@ -192,7 +160,7 @@ void GaussianBlur::OnMouseMove(WPARAM btnState, int x, int y)
 	lastMousePos.y = y;
 }
 
-void GaussianBlur::OnKeyboardInput(const GameTime& gt)
+void BasicTess::OnKeyboardInput(const GameTime& gt)
 {
 	const float dt = gt.DeltaTime();
 
@@ -210,7 +178,7 @@ void GaussianBlur::OnKeyboardInput(const GameTime& gt)
 	sunPhi = MathHelper::Clamp(sunPhi, 0.1f, XM_PIDIV2);
 }
 
-void GaussianBlur::UpdateObjectCBs()
+void BasicTess::UpdateObjectCBs()
 {
 
 	auto currObjectCB = mCurrFrameResource->objCB.get();
@@ -220,7 +188,7 @@ void GaussianBlur::UpdateObjectCBs()
 		if (e->NumFramesDirty > 0)
 		{
 			mWorld = e->world;
-			XMMATRIX w = XMLoadFloat4x4(&mWorld) * XMMatrixTranslation(0.0, -20.0, 50.f);
+			XMMATRIX w = XMLoadFloat4x4(&mWorld);
 			//XMMATRIX赋值给XMFLOAT4X4
 			XMStoreFloat4x4(&objConstants.world, XMMatrixTranspose(w));
 
@@ -236,7 +204,7 @@ void GaussianBlur::UpdateObjectCBs()
 	}
 }
 
-void GaussianBlur::UpdateMainPassCB()
+void BasicTess::UpdateMainPassCB()
 {
 	float y = radius * cosf(phi);
 	float x = radius * sinf(phi) * cosf(theta);
@@ -272,7 +240,7 @@ void GaussianBlur::UpdateMainPassCB()
 	mCurrFrameResource->passCB->CopyData(0, passConstants);
 }
 
-void GaussianBlur::UpdateMatCB()
+void BasicTess::UpdateMatCB()
 {
 	for (auto& m : materials)
 	{
@@ -296,114 +264,7 @@ void GaussianBlur::UpdateMatCB()
 	}
 }
 
-void GaussianBlur::UpdateWaves(const GameTime& gt)
-{
-	static float t_base = 0.0f;
-	if ((gt.TotalTime() - t_base) >= 0.25f)
-	{
-		t_base += 0.25f;	//0.25秒生成一个波浪
-		//随机生成横坐标
-		int i = MathHelper::Rand(4, mWaves->RowCount() - 5);
-		//随机生成纵坐标
-		int j = MathHelper::Rand(4, mWaves->ColumnCount() - 5);
-		//随机生成波的半径
-		float r = MathHelper::RandF(0.2f, 0.5f);//float用RandF函数
-		//使用波动方程函数生成波纹
-		mWaves->Disturb(i, j, r);
-	}
-
-	mWaves->Update(gt.DeltaTime());
-
-	auto currWavesVB = mCurrFrameResource->WavesVB.get();
-	for (int i = 0; i < mWaves->VertexCount(); ++i)
-	{
-		Vertex v;
-		v.Pos = mWaves->Position(i);
-		v.Normal = mWaves->Normal(i);
-		v.Tex.x = 0.5f + v.Pos.x / mWaves->Width();
-		v.Tex.y = 0.5f - v.Pos.z / mWaves->Depth();
-
-		currWavesVB->CopyData(i, v);
-	}
-
-	// Set the dynamic VB of the wave renderitem to the current frame VB.
-	mWavesRitem->geo->vertexBufferGpu = currWavesVB->Resource();
-}
-
-void GaussianBlur::BuildWavesGeometryBuffers()
-{
-	std::vector<std::uint16_t> indices(3 * mWaves->TriangleCount());
-
-	assert(mWaves->VertexCount() < 0x0000ffff);
-
-	int m = mWaves->RowCount();
-	int n = mWaves->ColumnCount();
-	int k = 0;
-	for (int i = 0; i < m - 1; i++)
-	{
-		for (int j = 0; j < n - 1; ++j)
-		{
-			indices[k] = i * n + j;
-			indices[k + 1] = i * n + j + 1;
-			indices[k + 2] = (i + 1) * n + j;
-
-			indices[k + 3] = (i + 1) * n + j;
-			indices[k + 4] = i * n + j + 1;
-			indices[k + 5] = (i + 1) * n + j + 1;
-
-			k += 6; // next quad
-		}
-	}
-
-	UINT vbByteSize = mWaves->VertexCount() * sizeof(Vertex);
-	UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-	auto geo = std::make_unique<MeshGeometry>();
-	geo->name = "lakeGeo";
-
-	// Set dynamically.
-	geo->vertexBufferCpu = nullptr;
-	geo->vertexBufferGpu = nullptr;
-
-	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
-
-	geo->vertexBufferByteSize = vbByteSize;
-	geo->vertexByteStride = sizeof(Vertex);
-	geo->indexBufferByteSize = ibByteSize;
-	geo->indexFormat = DXGI_FORMAT_R16_UINT;
-
-	SubmeshGeometry lakeSubmesh;
-	lakeSubmesh.IndexCount = (UINT)indices.size();
-	lakeSubmesh.StartIndexLocation = 0;
-	lakeSubmesh.BaseVertexLocation = 0;
-
-	geo->DrawArgs["lakeGrid"] = lakeSubmesh;
-
-	geometries["lakeGeo"] = std::move(geo);
-
-}
-
-void GaussianBlur::AnimateMaterials(const GameTime& gt)
-{
-	auto matLake = materials["water"].get();
-	float& du = matLake->matTransform(3, 0);
-	float& dv = matLake->matTransform(3, 1);
-
-	du += 0.1f * gt.DeltaTime();
-	dv += 0.02f * gt.DeltaTime();
-
-	if (du >= 1.0f)
-		du = 0.0f;
-	if (dv >= 1.0f)
-		dv = 0.0f;
-	//将du和dv存入矩阵
-	matLake->matTransform(3, 0) = du;
-	matLake->matTransform(3, 1) = dv;
-
-	matLake->numFramesDirty = 3;
-
-}
-
-ComPtr<ID3D12Resource> GaussianBlur::CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer)
+ComPtr<ID3D12Resource> BasicTess::CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer)
 {
 	// 创建上传堆
 	ThrowIfFailed(device->CreateCommittedResource(
@@ -452,7 +313,7 @@ ComPtr<ID3D12Resource> GaussianBlur::CreateDefaultBuffer(UINT64 byteSize, const 
 	return defaultBuffer;
 }
 
-std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GaussianBlur::GetStaticSamplers()
+std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> BasicTess::GetStaticSamplers()
 {
 	const CD3DX12_STATIC_SAMPLER_DESC pointWrap(
 		0, // shaderRegister
@@ -506,7 +367,7 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GaussianBlur::GetStaticSamplers
 		anisotropicWrap, anisotropicClamp };
 }
 
-void GaussianBlur::BuildDescriptorHeaps()
+void BasicTess::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
 	cbvHeapDesc.NumDescriptors = (objCount + 1) * gNumFrameResources; // (objCB + passCB) * frameCounts
@@ -515,15 +376,15 @@ void GaussianBlur::BuildDescriptorHeaps()
 	cbvHeapDesc.NodeMask = 0;
 	ThrowIfFailed(device->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&cbvHeap)));
 
-	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 7; // 3 + 4
+	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
+	srvHeapDesc.NumDescriptors = 3; // (objCB + passCB) * frameCounts
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	srvHeapDesc.NodeMask = 0;
 	ThrowIfFailed(device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvHeap)));
 }
 
-void GaussianBlur::BuildConstantBuffers()
+void BasicTess::BuildConstantBuffers()
 {
 	// obj cBuffer
 	UINT objCBByteSize = CalcConstantBufferByteSize<ObjectConstants>();
@@ -589,20 +450,12 @@ void GaussianBlur::BuildConstantBuffers()
 		srvHandle.Offset(1, srvDescriptorSize);
 		srvDesc.Format = fenceTex->GetDesc().Format;
 		device->CreateShaderResourceView(fenceTex.Get(), &srvDesc, srvHandle);
-
 	}
-	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvHeap->GetCPUDescriptorHandleForHeapStart());
-	auto handle2 = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvHeap->GetGPUDescriptorHandleForHeapStart());
-	mBlurFilter->BuildDescriptors(
-		handle,
-		3,
-		handle2,
-		3,
-		srvDescriptorSize);
+
 
 }
 
-void GaussianBlur::BuildRootSignature()
+void BasicTess::BuildRootSignature()
 {
 	// 每个根参数只能绑定一个寄存器空间中的特定类型资源
 	CD3DX12_ROOT_PARAMETER slotRootParameter[4];
@@ -644,270 +497,71 @@ void GaussianBlur::BuildRootSignature()
 	));
 }
 
-void GaussianBlur::BuildPostProcessRootSignature()
+void BasicTess::BuildShadersAndInputLayout()
 {
-	CD3DX12_DESCRIPTOR_RANGE srvTable;
-	srvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-
-	CD3DX12_DESCRIPTOR_RANGE uavTable;
-	uavTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
-
-	CD3DX12_ROOT_PARAMETER slotRootParameter[3];
-
-	slotRootParameter[0].InitAsConstants(12, 0);
-	slotRootParameter[1].InitAsDescriptorTable(1, &srvTable);
-	slotRootParameter[2].InitAsDescriptorTable(1, &uavTable);
-
-	auto staticSamplers = GetStaticSamplers();
-
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3,
-		slotRootParameter,
-		0,
-		nullptr,
-		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
-		);
-
-	ComPtr<ID3DBlob> serializedRootSig = nullptr;
-	ComPtr<ID3DBlob> errorBlob = nullptr;
-
-	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
-
-	if (errorBlob != nullptr)
-	{
-		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-	}
-	ThrowIfFailed(hr);
-
-	ThrowIfFailed(device->CreateRootSignature(
-		0,
-		serializedRootSig->GetBufferPointer(),
-		serializedRootSig->GetBufferSize(),
-		IID_PPV_ARGS(postProcessRootSignature.GetAddressOf())
-	));
-}
-
-void GaussianBlur::BuildShadersAndInputLayout()
-{
-
 	inputLayoutDesc =
 	{
-		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		  { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		  { "TEXCOORD",   0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+
 	};
 
-	treeBillboardInputLayoutDesc =
-	{
-		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		  { "SIZE",   0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-	};
-
-	const D3D_SHADER_MACRO defines[] =
-	{
-		"FOG", "1",
-		NULL, NULL
-	};
-
-	const D3D_SHADER_MACRO alphaTestDefines[] =
-	{
-		"ALPHA_TEST", "1",
-		"FOG", "1",
-		NULL, NULL
-	};
-
-	shaders["standardVS"] = CompileShader(std::wstring(L"shader/default.hlsl"), nullptr, "VSMain", "vs_5_0");
-	shaders["opaquePS"] = CompileShader(std::wstring(L"shader/default.hlsl"), defines, "PSMain", "ps_5_0");
-	shaders["alphaTestedPS"] = CompileShader(std::wstring(L"shader/default.hlsl"), alphaTestDefines, "PSMain", "ps_5_0");
-
-	shaders["treeBillboardVS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), nullptr, "VS", "vs_5_0");
-	shaders["treeBillboardGS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), nullptr, "GS", "gs_5_0");
-	shaders["treeBillboardPS"] = CompileShader(std::wstring(L"shader/treeBillboard.hlsl"), alphaTestDefines, "PS", "ps_5_0");
-	
-	
-	shaders["horzBlurCS"] = CompileShader(std::wstring(L"shader/gaussion.hlsl"), nullptr, "HorzBlurCS", "cs_5_0");
-	shaders["vertBlurCS"] = CompileShader(std::wstring(L"shader/gaussion.hlsl"), nullptr, "VertBlurCS", "cs_5_0");
+	shaders["tessVS"] = CompileShader(std::wstring(L"shader/Tessellation.hlsl"), nullptr, "VS", "vs_5_0");
+	shaders["tessHS"] = CompileShader(std::wstring(L"shader/Tessellation.hlsl"), nullptr, "HS", "hs_5_0");
+	shaders["tessDS"] = CompileShader(std::wstring(L"shader/Tessellation.hlsl"), nullptr, "DS", "ds_5_0");
+	shaders["tessPS"] = CompileShader(std::wstring(L"shader/Tessellation.hlsl"), nullptr, "PS", "ps_5_0");
 }
 
-void GaussianBlur::BuildShapeGeometry()
+
+void BasicTess::BuildQuadPatchGeometry()
 {
-	GeometryGenerator geoGen;
-	GeometryGenerator::MeshData grid = geoGen.CreateGrid(160.0f, 160.0f, 50, 50);
-
-	// concatenate all the geometry into one big vertex/index buffer
-	// **********************
-
-	size_t vertexCount = grid.Vertices.size();
-
-	std::vector<Vertex> vertices(vertexCount);
-
-	for (size_t i = 0; i < vertexCount; ++i)
+	std::array<XMFLOAT3, 4> vertices =
 	{
-		vertices[i].Pos = grid.Vertices[i].Position;
-		vertices[i].Pos.y = GetHillsHeight(vertices[i].Pos.x, vertices[i].Pos.z);
-		vertices[i].Normal = GetHillsNormal(vertices[i].Pos.x, vertices[i].Pos.z);
-		vertices[i].Tex = grid.Vertices[i].TexC;
-	}
+		XMFLOAT3(-10.0f, 0.0,  10.0),
+		XMFLOAT3(+10.0f, 0.0,  10.0),
+		XMFLOAT3(-10.0f, 0.0, -10.0),
+		XMFLOAT3(+10.0f, 0.0, -10.0),
+	};
 
-	std::vector<std::uint16_t> indices = grid.GetIndices16();
+	std::array<std::uint16_t, 4> indices = { 0, 1, 2, 3 };
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
 
 	auto geo = std::make_unique<MeshGeometry>();
-	geo->name = "landGeo";
+	geo->name = "quadpatchGeo";
 
 	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
 	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
 
 	geo->vertexBufferByteSize = vbByteSize;
-	geo->vertexByteStride = sizeof(Vertex);
-	geo->indexBufferByteSize = ibByteSize;
+	geo->vertexByteStride = sizeof(XMFLOAT3);
 	geo->indexFormat = DXGI_FORMAT_R16_UINT;
-
-	SubmeshGeometry gridSubmesh;
-	gridSubmesh.IndexCount = (UINT)indices.size();
-	gridSubmesh.StartIndexLocation = 0;
-	gridSubmesh.BaseVertexLocation = 0;
-
-	geo->DrawArgs["landGrid"] = gridSubmesh;
-	geometries["landGeo"] = std::move(geo);
-}
-
-void GaussianBlur::BuildBoxGeometry()
-{
-	GeometryGenerator geoGen;
-	GeometryGenerator::MeshData box = geoGen.CreateBox(8.0f, 8.0f, 8.0f, 3);
-
-	std::vector<Vertex> vertices(box.Vertices.size());
-	for (size_t i = 0; i < box.Vertices.size(); i++)
-	{
-		vertices[i].Pos = box.Vertices[i].Position;
-		vertices[i].Normal = box.Vertices[i].Normal;
-		vertices[i].Tex = box.Vertices[i].TexC;
-	}
-
-	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
-	std::vector<std::uint16_t> indices = box.GetIndices16();
-	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-
-	auto geo = std::make_unique<MeshGeometry>();
-	geo->name = "boxGeo";
-
-	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
-	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
-
-	geo->vertexBufferByteSize = vbByteSize;
-	geo->vertexByteStride = sizeof(Vertex);
 	geo->indexBufferByteSize = ibByteSize;
-	geo->indexFormat = DXGI_FORMAT_R16_UINT;
 
 	SubmeshGeometry submesh;
-	submesh.BaseVertexLocation = 0;
-	submesh.StartIndexLocation = 0;
 	submesh.IndexCount = (UINT)indices.size();
-
-	geo->DrawArgs["box"] = submesh;
-
-	geometries["boxGeo"] = std::move(geo);
-}
-
-void GaussianBlur::BuildTreeBillboardGeometry()
-{
-	struct TreeBillboardVertex
-	{
-		XMFLOAT3 Pos;
-		XMFLOAT2 Size;
-	};
-
-	const int treeCount = 16;
-
-	std::array<TreeBillboardVertex, treeCount> vertices;
-	for (UINT i = 0; i < treeCount; i++)
-	{
-		float x = MathHelper::RandF(-45.0f, 45.0f);
-		float z = MathHelper::RandF(-45.0f, 45.0f);
-		float y = GetHillsHeight(x, z);
-		y -= 12.0f;
-		z += 50.0f;
-
-		vertices[i].Pos = XMFLOAT3(x, y, z);
-		vertices[i].Size = XMFLOAT2(15.0f, 15.0f);
-	}
-
-	std::array<std::uint16_t, treeCount> indices;
-	UINT j = 0;
-	for (UINT i = 0; i < treeCount; i++)
-	{
-		indices[i] = i;
-	}
-
-	const UINT vbByteSize = (UINT)treeCount * sizeof(TreeBillboardVertex);
-	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-
-
-	auto geo = std::make_unique<MeshGeometry>();
-
-	geo->name = "treeBillboardGeo";
-	geo->vertexBufferByteSize = vbByteSize;
-	geo->vertexByteStride = sizeof(TreeBillboardVertex);
-	geo->indexBufferByteSize = ibByteSize;
-	geo->indexFormat = DXGI_FORMAT_R16_UINT;
-
-	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
-	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
-
-	SubmeshGeometry submesh;
-	submesh.BaseVertexLocation = 0;
 	submesh.StartIndexLocation = 0;
-	submesh.IndexCount = (UINT)indices.size();
-	geo->DrawArgs["treeBillboard"] = submesh;
+	submesh.BaseVertexLocation = 0;
+
+	geo->DrawArgs["quadpatch"] = submesh;
 
 	geometries[geo->name] = std::move(geo);
-
 }
 
-void GaussianBlur::BuildMaterials()
+void BasicTess::BuildMaterials()
 {
+	auto whiteMat = std::make_unique<Material>();
+	whiteMat->name = "quadMat";
+	whiteMat->matCBIndex = 0;
+	whiteMat->diffuseSrvHeapIndex = 1;
+	whiteMat->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	whiteMat->fresnelR0 = XMFLOAT3(0.1, 0.1, 0.1);
+	whiteMat->roughness = 0.5f;
 
-	auto grass = std::make_unique<Material>();
-	grass->name = "grass";
-	grass->matCBIndex = 0;
-	grass->diffuseSrvHeapIndex = 0;
-	grass->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	grass->fresnelR0 = XMFLOAT3(0.01, 0.01, 0.01);
-	grass->roughness = 0.125f;
-
-	auto water = std::make_unique<Material>();
-	water->name = "water";
-	water->matCBIndex = 1;
-	water->diffuseSrvHeapIndex = 1;
-	water->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	water->fresnelR0 = XMFLOAT3(0.2, 0.2, 0.2);
-	water->roughness = 0.0f;
-
-	auto WireFence = std::make_unique<Material>();
-	WireFence->name = "WireFence";
-	WireFence->matCBIndex = 2;
-	WireFence->diffuseSrvHeapIndex = 2;
-	WireFence->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	WireFence->fresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
-	WireFence->roughness = 0.25f;
-
-	auto treeBillboard = std::make_unique<Material>();
-	treeBillboard->name = "treeBillboard";
-	treeBillboard->matCBIndex = 3;
-	treeBillboard->diffuseSrvHeapIndex = 3;
-	treeBillboard->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	treeBillboard->fresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
-	treeBillboard->roughness = 0.8f;
-
-	materials["WireFence"] = std::move(WireFence);
-	materials["grass"] = std::move(grass);
-	materials["water"] = std::move(water);
+	materials["grass"] = std::move(whiteMat);
 }
 
-void GaussianBlur::LoadTextures()
+void BasicTess::LoadTextures()
 {
 	auto grassTex = std::make_unique<Texture>();
 	grassTex->name = "grassTex";
@@ -945,154 +599,73 @@ void GaussianBlur::LoadTextures()
 		fenceTex->UploadHeap
 	));
 
-	auto treeArrayTex = std::make_unique<Texture>();
-	treeArrayTex->name = "treeArrayTex";
-	treeArrayTex->Filename = L"./model/treeArray.dds";
-	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
-		device.Get(),
-		cmdList.Get(),
-		treeArrayTex->Filename.c_str(),
-		treeArrayTex->Resource,
-		treeArrayTex->UploadHeap
-	));
-
 	textures[grassTex->name] = std::move(grassTex);
 	textures[waterTex->name] = std::move(waterTex);
 	textures[fenceTex->name] = std::move(fenceTex);
-	textures[treeArrayTex->name] = std::move(treeArrayTex);
 }
 
-void GaussianBlur::BuildPSO()
+void BasicTess::BuildPSO()
 {
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC opaquePsoDesc = {};
+	ZeroMemory(&opaquePsoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
 	opaquePsoDesc.InputLayout = { inputLayoutDesc.data(), (unsigned int)inputLayoutDesc.size() };
 	opaquePsoDesc.pRootSignature = rootSignature.Get();
 	opaquePsoDesc.VS = {
-		reinterpret_cast<BYTE*>(shaders["standardVS"]->GetBufferPointer()),
-		shaders["standardVS"]->GetBufferSize()
+		reinterpret_cast<BYTE*>(shaders["tessVS"]->GetBufferPointer()),
+		shaders["tessVS"]->GetBufferSize()
+	};
+	opaquePsoDesc.HS = {
+		reinterpret_cast<BYTE*>(shaders["tessHS"]->GetBufferPointer()),
+		shaders["tessHS"]->GetBufferSize()
+	};
+	opaquePsoDesc.DS = {
+		reinterpret_cast<BYTE*>(shaders["tessDS"]->GetBufferPointer()),
+		shaders["tessDS"]->GetBufferSize()
 	};
 	opaquePsoDesc.PS = {
-		reinterpret_cast<BYTE*>(shaders["opaquePS"]->GetBufferPointer()),
-		shaders["opaquePS"]->GetBufferSize()
+		reinterpret_cast<BYTE*>(shaders["tessPS"]->GetBufferPointer()),
+		shaders["tessPS"]->GetBufferSize()
 	};
 	opaquePsoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
 	CD3DX12_RASTERIZER_DESC Raster(D3D12_DEFAULT);
-	//Raster.FillMode = D3D12_FILL_MODE_WIREFRAME;
-	//Raster.CullMode = D3D12_CULL_MODE_BACK;
+	Raster.FillMode = D3D12_FILL_MODE_WIREFRAME;
+	Raster.CullMode = D3D12_CULL_MODE_BACK;
 	opaquePsoDesc.RasterizerState = Raster;
 	// default blendstate
 	opaquePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	opaquePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);;
 	opaquePsoDesc.SampleMask = UINT_MAX;
-	opaquePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	opaquePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
 	opaquePsoDesc.NumRenderTargets = 1;
 	opaquePsoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	opaquePsoDesc.SampleDesc.Count = 1;
+	opaquePsoDesc.SampleDesc.Quality = 0;
 	opaquePsoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	psos["opaque"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&psos["opaque"])));
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC transparentPsoDesc = opaquePsoDesc;
-	D3D12_RENDER_TARGET_BLEND_DESC transparencyBlendDesc;
-	transparencyBlendDesc.BlendEnable = true;
-	transparencyBlendDesc.LogicOpEnable = false;
-	transparencyBlendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
-	transparencyBlendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-	transparencyBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;
-	transparencyBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
-	transparencyBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
-	transparencyBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
-	transparencyBlendDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
-	transparencyBlendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-	transparentPsoDesc.BlendState.RenderTarget[0] = transparencyBlendDesc;
-	psos["transparent"] = nullptr;
-	ThrowIfFailed(device->CreateGraphicsPipelineState(&transparentPsoDesc, IID_PPV_ARGS(&psos["transparent"])));
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC alphaTestedPsoDesc = opaquePsoDesc;
-	alphaTestedPsoDesc.PS =
-	{
-		reinterpret_cast<BYTE*>(shaders["alphaTestedPS"]->GetBufferPointer()),
-		shaders["alphaTestedPS"]->GetBufferSize()
-	};
-
-	// notes：disable the back cull, we need to see the back of the transparent obj
-	alphaTestedPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-
-	psos["alphaTested"] = nullptr;
-	ThrowIfFailed(device->CreateGraphicsPipelineState(&alphaTestedPsoDesc, IID_PPV_ARGS(&psos["alphaTested"])));
-
-
-	// PSO for horizontal blur
-	D3D12_COMPUTE_PIPELINE_STATE_DESC horzBlurPso = {};
-	horzBlurPso.pRootSignature = postProcessRootSignature.Get();
-	horzBlurPso.CS = {
-		reinterpret_cast<BYTE*>(shaders["horzBlurCS"]->GetBufferPointer()),
-		shaders["horzBlurCS"]->GetBufferSize()
-	};
-	horzBlurPso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-	psos["horzBlur"] = nullptr;
-	ThrowIfFailed(device->CreateComputePipelineState(&horzBlurPso, IID_PPV_ARGS(&psos["horzBlur"])));
-
-	// PSO for vertical blur
-	D3D12_COMPUTE_PIPELINE_STATE_DESC vertBlurPso = {};
-	vertBlurPso.pRootSignature = postProcessRootSignature.Get();
-	vertBlurPso.CS = {
-		reinterpret_cast<BYTE*>(shaders["vertBlurCS"]->GetBufferPointer()),
-		shaders["vertBlurCS"]->GetBufferSize()
-	};
-	vertBlurPso.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-	psos["vertBlur"] = nullptr;
-	ThrowIfFailed(device->CreateComputePipelineState(&vertBlurPso, IID_PPV_ARGS(&psos["vertBlur"])));
-
+	
 }
 
-void GaussianBlur::BuildRenderItem()
+void BasicTess::BuildRenderItem()
 {
 	auto landRitem = std::make_unique<RenderItem>();
 	landRitem->world = MathHelper::Identity4x4();
 	XMStoreFloat4x4(&landRitem->texTransform, XMMatrixScaling(7.0f, 7.f, 1.0f));
 	landRitem->objCBIndex = 0;
 	landRitem->mat = materials["grass"].get();
-	landRitem->geo = geometries["landGeo"].get();
-	landRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	landRitem->indexCount = landRitem->geo->DrawArgs["landGrid"].IndexCount;
-	landRitem->baseVertexLocation = landRitem->geo->DrawArgs["landGrid"].BaseVertexLocation;
-	landRitem->startIndexLocation = landRitem->geo->DrawArgs["landGrid"].StartIndexLocation;
+	landRitem->geo = geometries["quadpatchGeo"].get();
+	landRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST;
+	landRitem->indexCount = landRitem->geo->DrawArgs["quadpatch"].IndexCount;
+	landRitem->baseVertexLocation = landRitem->geo->DrawArgs["quadpatch"].BaseVertexLocation;
+	landRitem->startIndexLocation = landRitem->geo->DrawArgs["quadpatch"].StartIndexLocation;
 	ritemLayer[(int)RenderLayer::Opaque].push_back(landRitem.get());
 
-	auto lakeRitem = std::make_unique<RenderItem>();
-	lakeRitem->world = MathHelper::Identity4x4();
-	XMStoreFloat4x4(&lakeRitem->texTransform, XMMatrixScaling(7.0f, 7.f, 1.0f));
-	lakeRitem->objCBIndex = 1;
-	lakeRitem->mat = materials["water"].get();
-	lakeRitem->geo = geometries["lakeGeo"].get();
-	lakeRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	lakeRitem->indexCount = lakeRitem->geo->DrawArgs["lakeGrid"].IndexCount;
-	lakeRitem->baseVertexLocation = lakeRitem->geo->DrawArgs["lakeGrid"].BaseVertexLocation;
-	lakeRitem->startIndexLocation = lakeRitem->geo->DrawArgs["lakeGrid"].StartIndexLocation;
-
-	ritemLayer[(int)RenderLayer::Transparent].push_back(lakeRitem.get());
-	mWavesRitem = lakeRitem.get();
-
-	auto boxRitem = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&boxRitem->world, XMMatrixTranslation(0.0f, 4.0f, -7.0f));
-	boxRitem->objCBIndex = 2;
-	boxRitem->mat = materials["WireFence"].get();
-	boxRitem->geo = geometries["boxGeo"].get();
-	boxRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	boxRitem->indexCount = boxRitem->geo->DrawArgs["box"].IndexCount;
-	boxRitem->baseVertexLocation = boxRitem->geo->DrawArgs["box"].BaseVertexLocation;
-	boxRitem->startIndexLocation = boxRitem->geo->DrawArgs["box"].StartIndexLocation;
-	ritemLayer[(int)RenderLayer::AlphaTest].push_back(boxRitem.get());
-
 	allRitems.push_back(std::move(landRitem));
-	allRitems.push_back(std::move(lakeRitem));
-	allRitems.push_back(std::move(boxRitem));
+
 	objCount = allRitems.size();
 }
 
-void GaussianBlur::DrawRenderItems(const std::vector<RenderItem*>& ritems)
+void BasicTess::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 {
 
 	//遍历渲染项数组
@@ -1109,6 +682,7 @@ void GaussianBlur::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 		cmdList->IASetIndexBuffer(get_rvalue_ptr(ritem->geo->IndexBufferView()));
 		cmdList->IASetPrimitiveTopology(ritem->primitiveType);
 
+		
 		CD3DX12_GPU_DESCRIPTOR_HANDLE texHandle(srvHeap->GetGPUDescriptorHandleForHeapStart());
 		texHandle.Offset(ritem->mat->diffuseSrvHeapIndex, srvDescriptorSize);
 		cmdList->SetGraphicsRootDescriptorTable(0, texHandle);
@@ -1121,6 +695,7 @@ void GaussianBlur::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 		matCBAddres += ritem->mat->matCBIndex * matCBByteSize;
 		cmdList->SetGraphicsRootConstantBufferView(2, matCBAddres);
 
+
 		//绘制顶点（通过索引缓冲区绘制）
 		cmdList->DrawIndexedInstanced(ritem->indexCount, //每个实例要绘制的索引数
 			1,	//实例化个数
@@ -1130,7 +705,7 @@ void GaussianBlur::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 	}
 }
 
-void GaussianBlur::BuildFrameResources()
+void BasicTess::BuildFrameResources()
 {
 	for (int i = 0; i < gNumFrameResources; i++)
 	{
@@ -1138,19 +713,18 @@ void GaussianBlur::BuildFrameResources()
 			device.Get(),
 			1,
 			objCount,
-			(UINT)materials.size(),
-			mWaves->VertexCount()
+			(UINT)materials.size()
 		));
 
 	}
 }
 
-float GaussianBlur::GetHillsHeight(float x, float z)
+float BasicTess::GetHillsHeight(float x, float z)
 {
 	return 0.3f * (z * sinf(0.1f * x) + x * cosf(0.1f * z));
 }
 
-XMFLOAT3 GaussianBlur::GetHillsNormal(float x, float z) const
+XMFLOAT3 BasicTess::GetHillsNormal(float x, float z) const
 {
 	XMFLOAT3 normal = XMFLOAT3(
 		-0.03f * z * cosf(0.1f * x) - cosf(0.1f * z),

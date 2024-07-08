@@ -4,7 +4,6 @@
 using namespace DirectX;
 using namespace Microsoft::WRL;
 
-
 struct Vertex
 {
 	Vertex() = default;

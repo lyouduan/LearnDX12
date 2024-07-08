@@ -1,6 +1,12 @@
 #include "./src/stdafx.h"
 
-#define CS
+#define Tess
+
+#ifdef Tess
+#include "./src/BasicTess.h"
+#define APP BasicTess
+#endif // 
+
 
 #ifdef Stencil
 #include "./src/StencilApp.h"

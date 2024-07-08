@@ -1,8 +1,5 @@
 #pragma once
-
-#pragma once
 #include "D3DApp.h"
-#include "BlurFilter.h"
 using namespace DirectX::PackedVector;
 using namespace DirectX;
 
@@ -34,11 +31,11 @@ struct RenderItem
 };
 
 
-class GaussianBlur : public D3DApp
+class BasicTess : public D3DApp
 {
 public:
-	GaussianBlur();
-	~GaussianBlur();
+	BasicTess();
+	~BasicTess();
 	virtual bool Init(HINSTANCE hInstance, int nShowCmd) override;
 private:
 
@@ -55,22 +52,15 @@ private:
 	void UpdateMainPassCB();
 	void UpdateMatCB();
 
-	void UpdateWaves(const GameTime& gt);
-	void BuildWavesGeometryBuffers();
-
-	void AnimateMaterials(const GameTime& gt);
-
 	ComPtr<ID3D12Resource> CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer);
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> GetStaticSamplers();
 
 	void BuildDescriptorHeaps();
 	void BuildConstantBuffers();
 	void BuildRootSignature();
-	void BuildPostProcessRootSignature();
 	void BuildShadersAndInputLayout();
-	void BuildShapeGeometry();
-	void BuildBoxGeometry();
-	void BuildTreeBillboardGeometry();
+
+	void BuildQuadPatchGeometry();
 
 	void BuildMaterials();
 	void LoadTextures();
@@ -83,17 +73,10 @@ private:
 	XMFLOAT3 GetHillsNormal(float x, float z) const;
 protected:
 	ComPtr<ID3D12RootSignature> rootSignature;
-	ComPtr<ID3D12RootSignature> postProcessRootSignature;
 	//ComPtr<ID3D12PipelineState> pipelineState;
 	std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayoutDesc;
-	std::vector<D3D12_INPUT_ELEMENT_DESC> treeBillboardInputLayoutDesc;
 	ComPtr<ID3DBlob> vertexShader;
 	ComPtr<ID3DBlob> pixelShader;
-
-	std::unique_ptr<Waves> mWaves;
-	RenderItem* mWavesRitem = nullptr;
-
-	std::unique_ptr<BlurFilter> mBlurFilter;
 
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> shaders;
 	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> psos;
