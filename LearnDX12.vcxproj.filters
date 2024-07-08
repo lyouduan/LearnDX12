@@ -51,9 +51,6 @@
     <ClCompile Include="src\BlurFilter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\TessellationApp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\BasicTess.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -105,9 +102,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\BlurFilter.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\TessellationApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\BasicTess.h">

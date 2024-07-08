@@ -514,15 +514,39 @@ void BasicTess::BuildShadersAndInputLayout()
 
 void BasicTess::BuildQuadPatchGeometry()
 {
-	std::array<XMFLOAT3, 4> vertices =
+	std::array<XMFLOAT3, 16> vertices =
 	{
-		XMFLOAT3(-10.0f, 0.0,  10.0),
-		XMFLOAT3(+10.0f, 0.0,  10.0),
-		XMFLOAT3(-10.0f, 0.0, -10.0),
-		XMFLOAT3(+10.0f, 0.0, -10.0),
+		XMFLOAT3(-10.0f, -10.0f, +15.0f),
+		XMFLOAT3(-5.0f,  0.0f, +15.0f),
+		XMFLOAT3(+5.0f,  0.0f, +15.0f),
+		XMFLOAT3(+10.0f, 0.0f, +15.0f),
+
+		// Row 1
+		XMFLOAT3(-15.0f, 0.0f, +5.0f),
+		XMFLOAT3(-5.0f,  0.0f, +5.0f),
+		XMFLOAT3(+5.0f,  20.0f, +5.0f),
+		XMFLOAT3(+15.0f, 0.0f, +5.0f),
+
+		// Row 2
+		XMFLOAT3(-15.0f, 0.0f, -5.0f),
+		XMFLOAT3(-5.0f,  0.0f, -5.0f),
+		XMFLOAT3(+5.0f,  0.0f, -5.0f),
+		XMFLOAT3(+15.0f, 0.0f, -5.0f),
+
+		// Row 3
+		XMFLOAT3(-10.0f, 10.0f, -15.0f),
+		XMFLOAT3(-5.0f,  0.0f, -15.0f),
+		XMFLOAT3(+5.0f,  0.0f, -15.0f),
+		XMFLOAT3(+25.0f, 10.0f, -15.0f)
 	};
 
-	std::array<std::uint16_t, 4> indices = { 0, 1, 2, 3 };
+	std::array<std::uint16_t, 16> indices = 
+	{
+		0, 1, 2, 3,
+		4, 5, 6, 7,
+		8, 9, 10, 11,
+		12, 13, 14, 15
+	};
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
@@ -654,7 +678,7 @@ void BasicTess::BuildRenderItem()
 	landRitem->objCBIndex = 0;
 	landRitem->mat = materials["grass"].get();
 	landRitem->geo = geometries["quadpatchGeo"].get();
-	landRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_4_CONTROL_POINT_PATCHLIST;
+	landRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_16_CONTROL_POINT_PATCHLIST; // 提交4个控制点的面片
 	landRitem->indexCount = landRitem->geo->DrawArgs["quadpatch"].IndexCount;
 	landRitem->baseVertexLocation = landRitem->geo->DrawArgs["quadpatch"].BaseVertexLocation;
 	landRitem->startIndexLocation = landRitem->geo->DrawArgs["quadpatch"].StartIndexLocation;
@@ -680,7 +704,7 @@ void BasicTess::DrawRenderItems(const std::vector<RenderItem*>& ritems)
 
 		cmdList->IASetVertexBuffers(0, 1, get_rvalue_ptr(ritem->geo->VertexBufferView()));
 		cmdList->IASetIndexBuffer(get_rvalue_ptr(ritem->geo->IndexBufferView()));
-		cmdList->IASetPrimitiveTopology(ritem->primitiveType);
+		cmdList->IASetPrimitiveTopology(ritem->primitiveType); // 传递控制点元图类型 patch
 
 		
 		CD3DX12_GPU_DESCRIPTOR_HANDLE texHandle(srvHeap->GetGPUDescriptorHandleForHeapStart());
