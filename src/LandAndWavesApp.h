@@ -108,11 +108,9 @@ protected:
 	std::unique_ptr<UploadBuffer<PassConstants>> mPassCB = nullptr;
 	PassConstants passConstants;
 
-	// MVP
-	XMFLOAT4X4 mWorld = MathHelper::Identity4x4();
-	XMFLOAT4X4 mView = MathHelper::Identity4x4();
-	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
-
+	// Camera
+	Camera camera;
+	float speedUp = 10.0f;
 	// syn
 	int mCurrFrameResourceIndex = 0;
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
@@ -124,8 +122,5 @@ protected:
 	float sunTheta = 1.25f * XM_PI;
 	float sunPhi = XM_PIDIV4;
 
-	float theta = 1.5f * XM_PI;;
-	float phi = XM_PIDIV4 -0.1;
-	float radius = 50.0;
 };
 

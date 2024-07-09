@@ -1,6 +1,6 @@
 #include "./src/stdafx.h"
 
-#define Tess
+#define Land
 
 #ifdef Tess
 #include "./src/BasicTess.h"

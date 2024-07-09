@@ -91,21 +91,31 @@ VertexOut VS(VertexIn vin)
 // 输出网格的曲面细分因子
 struct PatchTess
 {
-    float EdgeTess[4] : SV_TessFactor;
-    float InsideTess[2] : SV_InsideTessFactor;
+    float EdgeTess[3] : SV_TessFactor;
+    float InsideTess[1] : SV_InsideTessFactor;
 };
 
-PatchTess ConstantHS(InputPatch<VertexOut, 16> patch, uint patchID : SV_PrimitiveID)
+PatchTess ConstantHS(InputPatch<VertexOut, 3> patch, uint patchID : SV_PrimitiveID)
 {
     PatchTess pt;
     
-    pt.EdgeTess[0] = 25; // 左
-    pt.EdgeTess[1] = 25; // 上
-    pt.EdgeTess[2] = 25; // 右
-    pt.EdgeTess[3] = 25; // 下
+    
+    
+    float3 centerL = 0.333 * (patch[0].PosL + patch[1].PosL + patch[2].PosL);
+    float3 centerW = mul(float4(centerL, 1.0f), world).xyz;
+    
+    float d = distance(centerW, gEyePosW);
+    
+    float d0 = 20.0;
+    float d1 = 100.0f;
+    float tess = 64.0 * saturate((d1 - d) / (d1 - d0));
+    
+    
+    pt.EdgeTess[0] = tess; // 左
+    pt.EdgeTess[1] = tess; // 上
+    pt.EdgeTess[2] = tess; // 右
 	
-    pt.InsideTess[0] = 25; // u轴内部细分列数
-    pt.InsideTess[1] = 25; // v轴内部细分列数
+    pt.InsideTess[0] = tess; // u轴内部细分列数
 	
     return pt;
 }
@@ -115,13 +125,13 @@ struct HullOut
     float3 PosL : POSITIONT;
 };
 
-[domain("quad")] // 片面类型
+[domain("tri")] // 片面类型
 [partitioning("integer")] // 细分模式
 [outputtopology("triangle_cw")] // 三角形的绕序
-[outputcontrolpoints(16)] //外壳着色器的执行次数，每次执行输出1个控制点
+[outputcontrolpoints(3)] //外壳着色器的执行次数，每次执行输出1个控制点
 [patchconstantfunc("ConstantHS")] // 常量外壳着色器函数名称
 [maxtessfactor(64.0f)] //曲面细分因子的最大值1-64
-HullOut HS(InputPatch<VertexOut, 16> p,
+HullOut HS(InputPatch<VertexOut, 3> p,
             uint i : SV_OutputControlPointID,
             uint patchId : SV_PrimitiveID)
 {
@@ -172,19 +182,18 @@ float3 CubicBezierSum(const OutputPatch<HullOut, 16> bezpatch, float4 basisU, fl
     return sum;
 }
 
-[domain("quad")]
+[domain("tri")]
 DomainOut DS(PatchTess patchTess,
-            float2 uv : SV_DomainLocation,
-            const OutputPatch<HullOut, 16> bezPatch)
+            float3 uvw : SV_DomainLocation,
+            const OutputPatch<HullOut, 3> patch)
 {
     DomainOut dout;
     
-    float4 basisU = BernsteinBasis(uv.x);
-    float4 basisV = BernsteinBasis(uv.y);
+    float3 v = patch[0].PosL * uvw.x + patch[1].PosL * uvw.y + patch[2].PosL * uvw.z;
 
-    float3 p = CubicBezierSum(bezPatch, basisU, basisV);
+    v.y = 0.0f;
     
-    float4 posW = mul(float4(p, 1.0f), world);
+    float4 posW = mul(float4(v, 1.0f), world);
     dout.PosH = mul(posW, viewProj);
     
     return dout;

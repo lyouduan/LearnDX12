@@ -131,6 +131,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\Camera.cpp" />
     <ClCompile Include="src\BasicTess.cpp" />
     <ClCompile Include="src\BlurFilter.cpp" />
     <ClCompile Include="src\GaussianBlur.cpp" />
@@ -146,6 +147,7 @@
     <ClCompile Include="src\StencilApp.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\BasicTess.h" />
     <ClInclude Include="src\BlurFilter.h" />
     <ClInclude Include="src\GaussianBlur.h" />

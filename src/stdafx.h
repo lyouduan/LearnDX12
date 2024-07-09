@@ -25,3 +25,4 @@
 #include "FrameResource.h"
 #include "Wave.h"
 #include "DDSTextureLoader.h"
+#include "Camera.h"

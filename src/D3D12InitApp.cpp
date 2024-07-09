@@ -127,8 +127,8 @@ void D3D12InitApp::OnResize()
 {
 	D3DApp::OnResize();
 	//构建投影矩阵
-	XMMATRIX p = XMMatrixPerspectiveFovLH(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
-	XMStoreFloat4x4(&mProj, p);
+
+	camera.SetLen(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
 }
 
 void D3D12InitApp::OnMouseDown(WPARAM btnState, int x, int y)
@@ -147,21 +147,13 @@ void D3D12InitApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
-		float dx = XMConvertToRadians(static_cast<float>(lastMousePos.x - x));
-		float dy = XMConvertToRadians(static_cast<float>(lastMousePos.y - y));
-		theta += dx;
-		phi += dy;
-		theta = MathHelper::Clamp(theta, 0.1f, XM_PI - 0.1f);
+		float dx = XMConvertToRadians(static_cast<float>(x - lastMousePos.x));
+		float dy = XMConvertToRadians(static_cast<float>(y - lastMousePos.y));
+
+		camera.Pitch(dy);
+		camera.RotateY(dx);
 	}
-	else if ((btnState & MK_RBUTTON) != 0)
-	{
-		float dx = 0.005f * static_cast<float>(x - lastMousePos.x);
-		float dy = 0.005f * static_cast<float>(y - lastMousePos.y);
-		//根据鼠标输入更新摄像机可视范围半径
-		radius += dx - dy;
-		//限制可视范围半径
-		radius = MathHelper::Clamp(radius, 1.0f, 20.0f);
-	}
+	
 	lastMousePos.x = x;
 	lastMousePos.y = y;
 }
@@ -169,6 +161,17 @@ void D3D12InitApp::OnMouseMove(WPARAM btnState, int x, int y)
 void D3D12InitApp::onKeybordInput(const GameTime& gt)
 {
 	const float dt = gt.DeltaTime();
+
+	if (GetAsyncKeyState('W') & 0x8000)
+		camera.Walk(10.0f*dt);
+	if (GetAsyncKeyState('S') & 0x8000)
+		camera.Walk(-10.0f * dt);
+	if (GetAsyncKeyState('A') & 0x8000)
+		camera.Strafe(-10.0f * dt);
+	if (GetAsyncKeyState('D') & 0x8000)
+		camera.Strafe(10.0f * dt);
+
+	camera.UpdateViewMatrix();
 
 	//左右键改变平行光的Theta角，上下键改变平行光的Phi角
 	if (GetAsyncKeyState(VK_LEFT) & 0x8000)
@@ -195,8 +198,7 @@ void D3D12InitApp::UpdateObjectCBs()
 		// 存在一个bug, NumFramesDirty变动了，并非初始化4，导致无法更新
 		if (e->NumFramesDirty > 0)
 		{
-			mWorld = e->world;
-			XMMATRIX w = XMLoadFloat4x4(&mWorld);
+			XMMATRIX w = XMLoadFloat4x4(&e->world);
 			XMMATRIX texTransform = XMLoadFloat4x4(&e->texTransform);
 			//XMMATRIX赋值给XMFLOAT4X4
 			XMStoreFloat4x4(&objConstants.world, XMMatrixTranspose(w));
@@ -211,20 +213,14 @@ void D3D12InitApp::UpdateObjectCBs()
 void D3D12InitApp::UpdateMainPassCB()
 {
 	
-	float y = radius * cosf(phi);
-	float x = radius * sinf(phi) * cosf(theta);
-	float z = radius * sinf(phi) * sinf(theta);
+	XMMATRIX view = camera.GetView(); // 左手坐标系
+	XMMATRIX proj = camera.GetProj();
 
-	XMVECTOR pos = XMVectorSet(x, y, z, 1.0);
-	XMVECTOR target = XMVectorZero();
-	XMVECTOR up = XMVectorSet(0.0, 1.0, 0.0, 0.0);
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up); // 左手坐标系
-	//
 	// view存到mView中
-	XMStoreFloat4x4(&mView, view);
-	XMMATRIX proj = XMLoadFloat4x4(&mProj);
 	XMMATRIX vp = view * proj;
 	XMStoreFloat4x4(&passConstants.viewProj, XMMatrixTranspose(vp));
+
+	passConstants.eyePosW = camera.GetPosition3f();
 
 	passConstants.ambientLight = { 0.25f,0.25f,0.25f,1.0f };
 
@@ -287,7 +283,6 @@ void D3D12InitApp::loadTexutres()
 		stoneTex->Resource,
 		stoneTex->UploadHeap
 	));
-
 
 	auto tileTex = std::make_unique<Texture>();
 	tileTex->Filename = L"./model/tile.dds";

@@ -97,12 +97,7 @@ protected:
 
 	std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 	std::unique_ptr<UploadBuffer<PassConstants>> mPassCB = nullptr;
-
-	// MVP
 	PassConstants passConstants;
-	XMFLOAT4X4 mWorld = MathHelper::Identity4x4();
-	XMFLOAT4X4 mView = MathHelper::Identity4x4();
-	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
 
 	// syn
 	int mCurrFrameResourceIndex = 0;
@@ -111,11 +106,9 @@ protected:
 
 	POINT lastMousePos;
 
-	float theta = 1.5f * XM_PI;;
-	float phi = XM_PIDIV4;
-	float radius = 5.0;
-
 	float sunTheta = 1.25f * XM_PI;
 	float sunPhi = XM_PIDIV4;
+	
+	Camera camera;
 };
 

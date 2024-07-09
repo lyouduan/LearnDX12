@@ -136,9 +136,8 @@ void LandAndWavesApp::Update()
 void LandAndWavesApp::OnResize()
 {
 	D3DApp::OnResize();
-	//构建投影矩阵
-	XMMATRIX p = XMMatrixPerspectiveFovLH(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
-	XMStoreFloat4x4(&mProj, p);
+
+	camera.SetLen(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
 }
 
 void LandAndWavesApp::OnMouseDown(WPARAM btnState, int x, int y)
@@ -157,21 +156,22 @@ void LandAndWavesApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
-		float dx = XMConvertToRadians(0.25 * static_cast<float>(lastMousePos.x - x));
-		float dy = XMConvertToRadians(0.25 * static_cast<float>(lastMousePos.y - y));
-		theta += dx;
-		phi += dy;
-		theta = MathHelper::Clamp(theta, 0.1f, XM_PI - 0.1f);
+		float dx = XMConvertToRadians(0.25 * static_cast<float>(x - lastMousePos.x));
+		float dy = XMConvertToRadians(0.25 * static_cast<float>(y - lastMousePos.y));
+
+		camera.RotateY(dx);
+		camera.Pitch(dy);
 	}
 	else if ((btnState & MK_RBUTTON) != 0)
 	{
-		float dx = 0.02f * static_cast<float>(x - lastMousePos.x);
-		float dy = 0.02f * static_cast<float>(y - lastMousePos.y);
+		float dx = 0.005f * static_cast<float>(x - lastMousePos.x);
+		float dy = 0.005f * static_cast<float>(y - lastMousePos.y);
 		//根据鼠标输入更新摄像机可视范围半径
-		radius += dx - dy;
+		speedUp += dx - dy;
 		//限制可视范围半径
-		radius = MathHelper::Clamp(radius, 5.0f, 150.0f);
+		speedUp = MathHelper::Clamp(speedUp, 5.0f, 50.0f);
 	}
+	
 	lastMousePos.x = x;
 	lastMousePos.y = y;
 }
@@ -181,15 +181,15 @@ void LandAndWavesApp::OnKeyboardInput(const GameTime& gt)
 	const float dt = gt.DeltaTime();
 
 	//左右键改变平行光的Theta角，上下键改变平行光的Phi角
-	if (GetAsyncKeyState(VK_LEFT) & 0x8000)
-		sunTheta -= 1.0f * dt;
-	if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
-		sunTheta += 1.0f * dt;
-	if (GetAsyncKeyState(VK_UP) & 0x8000)
-		sunPhi -= 1.0f * dt;
-	if (GetAsyncKeyState(VK_DOWN) & 0x8000)
-		sunPhi += 1.0f * dt;
-
+	if (GetAsyncKeyState('W') & 0x8000)
+		camera.Walk(speedUp * dt);
+	if (GetAsyncKeyState('S') & 0x8000)
+		camera.Walk(-speedUp * dt);
+	if (GetAsyncKeyState('A') & 0x8000)
+		camera.Strafe(-speedUp * dt);
+	if (GetAsyncKeyState('D') & 0x8000)
+		camera.Strafe(speedUp * dt);
+	camera.UpdateViewMatrix();
 	//将Phi约束在[0, PI/2]之间
 	sunPhi = MathHelper::Clamp(sunPhi, 0.1f, XM_PIDIV2);
 }
@@ -203,8 +203,7 @@ void LandAndWavesApp::UpdateObjectCBs()
 	{
 		if (e->NumFramesDirty > 0)
 		{
-			mWorld = e->world;
-			XMMATRIX w = XMLoadFloat4x4(&mWorld) * XMMatrixTranslation(0.0, -20.0, 50.f);
+			XMMATRIX w = XMLoadFloat4x4(&e->world) * XMMatrixTranslation(0.0, -20.0, 50.f);
 			//XMMATRIX赋值给XMFLOAT4X4
 			XMStoreFloat4x4(&objConstants.world, XMMatrixTranspose(w));
 
@@ -222,22 +221,13 @@ void LandAndWavesApp::UpdateObjectCBs()
 
 void LandAndWavesApp::UpdateMainPassCB()
 {
-	float y = radius * cosf(phi);
-	float x = radius * sinf(phi) * cosf(theta);
-	float z = radius * sinf(phi) * sinf(theta);
+	
+	XMMATRIX view = camera.GetView(); // 左手坐标系
 
-	XMVECTOR pos = XMVectorSet(x, y, z, 1.0);
-	XMVECTOR target = XMVectorZero();
-	XMVECTOR up = XMVectorSet(0.0, 1.0, 0.0, 0.0);
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up); // 左手坐标系
-
-	//  viewProjection
-	XMStoreFloat4x4(&mView, view);
-	XMMATRIX proj = XMLoadFloat4x4(&mProj);
+	XMMATRIX proj = camera.GetProj();
 	XMMATRIX vp = view * proj;
 	XMStoreFloat4x4(&passConstants.viewProj, XMMatrixTranspose(vp));
-
-	passConstants.eyePosW = { x, y, z };
+	passConstants.eyePosW = camera.GetPosition3f();
 
 	// light
 	passConstants.ambientLight = { 0.25f,0.25f,0.35f,1.0f };
