@@ -40,24 +40,18 @@ struct MaterialData
     uint MatPad1;
     uint MatPad2;
 };
-cbuffer cbPerObject : register(b0)
+
+struct InstanceData
 {
     float4x4 world;
     float4x4 texTransform;
-    uint gMaterialIndex;
-    uint gObjPad0;
-    uint gObjPad1;
-    uint gObjPad2;
+    uint materialDataIndex;
+    uint Pad0;
+    uint Pad1;
+    uint Pad2;
+};
 
-}
-//cbuffer cbMatObject : register(b1)
-//{
-//    float4 gDiffuseAlbedo;
-//    float3 gFresnelR0;
-//    float gRoughness;
-//}
-
-cbuffer cbPerObject : register(b1)
+cbuffer cbPerObject : register(b0)
 {
     float4x4 viewProj;
     float3 gEyePosW;
@@ -66,9 +60,10 @@ cbuffer cbPerObject : register(b1)
     Light gLights[MaxLights];
 }
 
-Texture2D gDiffuseMap[3] : register(t0); //所有漫反射贴图
+Texture2D gDiffuseMap[4] : register(t0); //所有漫反射贴图
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
+StructuredBuffer<InstanceData> gInstanceData : register(t1, space1);
 
 //6个不同类型的采样器
 SamplerState gSamPointWrap : register(s0);
@@ -100,28 +95,37 @@ struct VertexOut
     float3 WorldPos : POSITION;
     float3 WorldNormal : NORMAL;
     float2 Tex : TEXCOORD;
+    
+    nointerpolation uint matIndex : TEXCOORD1;
 };
 
-VertexOut VSMain(VertexIn vin)
+VertexOut VSMain(VertexIn vin, uint instanceID : SV_InstanceID)
 {
     VertexOut vout;
 	
+    InstanceData instData = gInstanceData[instanceID];
+    
+    MaterialData matData = gMaterialData[instData.materialDataIndex];
 	// Transform to homogeneous clip space.
-    float4 PosW = mul(float4(vin.PosL, 1.0f), world);
-    vout.WorldPos = PosW;
+    float4 PosW = mul(float4(vin.PosL, 1.0f), instData.world);
+    vout.WorldPos = PosW.xyz;
     
     vout.PosH = mul(PosW, viewProj);
     // 均匀缩放
-    vout.WorldNormal = mul(vin.Normal, (float3x3) world);
+    vout.WorldNormal = mul(vin.Normal, (float3x3) instData.world);
     
-    float4 texCoord = mul(float4(vin.Tex, 0.0f, 1.0f), texTransform);
+    float4 texCoord = mul(float4(vin.Tex, 0.0f, 1.0f), instData.texTransform);
+    
     vout.Tex = texCoord.xy;
+    
+    vout.matIndex = instData.materialDataIndex;
+    
     return vout;
 }
 
 float4 PSMain(VertexOut pin) : SV_Target
 {
-    MaterialData matData = gMaterialData[gMaterialIndex];
+    MaterialData matData = gMaterialData[pin.matIndex];
     
     float4 diffuseAlbedo = matData.DiffuseAlbedo;
     float3 fresnelR0 = matData.FresnelR0;

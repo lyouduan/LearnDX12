@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <fstream>
+#include <sstream>
 
 #include <stdexcept>
 #include <cassert>
@@ -16,6 +17,7 @@
 #include <DirectXColors.h>
 #include <DirectXMath.h>
 #include <DirectxPackedVector.h>
+#include <DirectXCollision.h>
 
 #include "MathHelper.h"
 #include "d3dUtil.h"

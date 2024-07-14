@@ -1,6 +1,12 @@
 #include "./src/stdafx.h"
 
-#define Land
+#define Instance
+
+#ifdef Instance
+#include "./src/InstancingAndCullingApp.h"
+#define APP InstancingAndCullingApp
+#endif // 
+
 
 #ifdef Tess
 #include "./src/BasicTess.h"

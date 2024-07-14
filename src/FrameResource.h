@@ -15,11 +15,44 @@ struct Vertex
 	DirectX::XMFLOAT3 Pos;
 	DirectX::XMFLOAT3 Normal;
 	DirectX::XMFLOAT2 Tex;
+
 };
+
+struct MaterialData
+{
+	DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
+	DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
+
+	float Roughness = 64.0f;
+
+	DirectX::XMFLOAT4X4 MatFransform = MathHelper::Identity4x4();
+
+	UINT DiffuseMapIndex = 0;
+	UINT MaterialPad0;
+	UINT MaterialPad1;
+	UINT MaterialPad2;
+};
+
+struct InstanceData
+{
+	DirectX::XMFLOAT4X4 world = MathHelper::Identity4x4();
+	DirectX::XMFLOAT4X4 texTransform = MathHelper::Identity4x4();
+
+	UINT MaterialIndex;
+	UINT InstancePad0;
+	UINT InstancePad1;
+	UINT InstancePad2;
+};
+
 struct ObjectConstants
 {
 	XMFLOAT4X4 world = MathHelper::Identity4x4();
 	XMFLOAT4X4 texTransform = MathHelper::Identity4x4();
+
+	UINT materialIndex = 0;
+	UINT Pad0;
+	UINT Pad1;
+	UINT Pad2;
 };
 
 struct PassConstants
@@ -63,6 +96,9 @@ struct FrameResource
 	std::unique_ptr<UploadBuffer<PassConstants>> passCB = nullptr;
 	std::unique_ptr<UploadBuffer<Vertex>> WavesVB = nullptr;
 	std::unique_ptr<UploadBuffer<MatConstants>> matCB = nullptr;
+
+	std::unique_ptr<UploadBuffer<MaterialData>> matBuffer = nullptr;
+	std::unique_ptr<UploadBuffer<InstanceData>> instanceBuffer = nullptr;
 
 	UINT64 fence = 0;
 

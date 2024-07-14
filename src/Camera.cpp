@@ -219,6 +219,17 @@ void Camera::RotateY(float angle)
 	mViewDirty = true;
 }
 
+void Camera::Roll(float angle)
+{
+	// Rotate the basis vectors about the world z-axis.
+	XMMATRIX R = XMMatrixRotationAxis(XMLoadFloat3(&mLook), angle);
+	// XMVector3TransformNormal忽略平移分量进行矩阵变换，即只做旋转和放缩
+	XMStoreFloat3(&mRight, XMVector3TransformNormal(XMLoadFloat3(&mRight), R));
+	XMStoreFloat3(&mUp, XMVector3TransformNormal(XMLoadFloat3(&mUp), R));
+
+	mViewDirty = true;
+}
+
 void Camera::UpdateViewMatrix()
 {
 	if (mViewDirty)

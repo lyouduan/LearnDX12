@@ -43,6 +43,7 @@ public:
 protected:
 	static D3DApp* mApp;
 	static const UINT FrameCount = 2;
+	std::wstring mMainWndCaption = L"d3d App";
 	HWND mhMainWnd = 0;
 	int width = 1280;
 	int height = 720;

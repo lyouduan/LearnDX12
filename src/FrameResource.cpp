@@ -12,7 +12,7 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objCount
 
 	WavesVB = std::make_unique<UploadBuffer<Vertex>>(device, waveVertCount, false);//一个顶点即一个子缓冲区
 
-	matCB = std::make_unique<UploadBuffer<MatConstants>>(device, matCount, true);
+	matBuffer = std::make_unique<UploadBuffer<MaterialData>>(device, matCount, false);
 
 }
 FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objCount, UINT matCount)
@@ -22,9 +22,10 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objCount
 		IID_PPV_ARGS(&cmdAllocator)
 	));
 
-	objCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objCount, true);
+	//objCB = std::make_unique<UploadBuffer<ObjectConstants>>(device, objCount, true);
 	passCB = std::make_unique<UploadBuffer<PassConstants>>(device, passCount, true);
-	matCB = std::make_unique<UploadBuffer<MatConstants>>(device, matCount, true);
+	instanceBuffer = std::make_unique<UploadBuffer<InstanceData>>(device, objCount, false);
+	matBuffer = std::make_unique<UploadBuffer<MaterialData>>(device, matCount, false);
 
 }
 FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objCount)

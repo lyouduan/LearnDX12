@@ -23,19 +23,23 @@ struct RenderItem
 	MeshGeometry* geo = nullptr;
 	Material* mat = nullptr;
 
+	std::vector<InstanceData> Instances;
+
 	int NumFramesDirty = gNumFrameResources;
 
 	UINT indexCount = 0;
+	UINT instanceCount = 0;
 	UINT startIndexLocation = 0;
 	UINT baseVertexLocation = 0;
+	BoundingBox Bounds;
 };
 
 
-class D3D12InitApp : public D3DApp
+class InstancingAndCullingApp : public D3DApp
 {
 public:
-	D3D12InitApp();
-	~D3D12InitApp();
+	InstancingAndCullingApp();
+	~InstancingAndCullingApp();
 	virtual bool Init(HINSTANCE hInstance, int nShowCmd) override;
 private:
 
@@ -62,7 +66,6 @@ private:
 	void BuildRootSignature();
 	void BuildShadersAndInputLayout();
 	void BuildShapeGeometry();
-	void BuildCubeGeometry();
 
 	void BuildMaterials();
 	void BuildSkullGeometry();
@@ -95,10 +98,12 @@ protected:
 	ComPtr<ID3D12DescriptorHeap> cbvHeap;
 	ComPtr<ID3D12DescriptorHeap> srvHeap;
 
-	std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
+	//std::unique_ptr<UploadBuffer<ObjectConstants>> mObjectCB = nullptr;
 	std::unique_ptr<UploadBuffer<PassConstants>> mPassCB = nullptr;
 	PassConstants passConstants;
 	MaterialData matData;
+	UINT mInstanceCount = 0;
+
 	// syn
 	int mCurrFrameResourceIndex = 0;
 	std::vector<std::unique_ptr<FrameResource>> mFrameResources;
@@ -108,7 +113,10 @@ protected:
 
 	float sunTheta = 1.25f * XM_PI;
 	float sunPhi = XM_PIDIV4;
-	
+
 	Camera camera;
+
+	// 
+	bool mFrustumCullingEnabled = true;
 };
 

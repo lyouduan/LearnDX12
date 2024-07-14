@@ -152,7 +152,7 @@ bool D3DApp::InitWindow(HINSTANCE hInstance, int nShowCmd)
 	int hight = R.bottom - R.top;
 
 	//创建窗口,返回布尔值
-	mhMainWnd = CreateWindow(L"MainWnd", L"DX12Initialize", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, hight, 0, 0, hInstance, 0);
+	mhMainWnd = CreateWindow(L"MainWnd", mMainWndCaption.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, hight, 0, 0, hInstance, 0);
 	//窗口创建失败
 	if (!mhMainWnd)
 	{
@@ -466,7 +466,7 @@ void D3DApp::CalculateFrameState()
 		std::wstring fpsStr = std::to_wstring(fps);//转为宽字符
 		std::wstring mspfStr = std::to_wstring(mspf);
 		//将帧数据显示在窗口上
-		std::wstring windowText = L"D3D12Init    fps:" + fpsStr + L"    " + L"mspf" + mspfStr;
+		std::wstring windowText = mMainWndCaption + L"    fps:" + fpsStr + L"    " + L"mspf" + mspfStr;
 		SetWindowText(mhMainWnd, windowText.c_str());
 
 		//为计算下一组帧数值而重置

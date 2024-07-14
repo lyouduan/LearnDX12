@@ -1,7 +1,10 @@
 #pragma once
 class MathHelper {
-
+    
 public:
+
+    static constexpr float Infinity = FLT_MAX;
+    static constexpr float Pi = 3.1415926535f;
 
     static float RandF()
     {

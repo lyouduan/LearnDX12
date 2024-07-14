@@ -63,6 +63,8 @@ public:
 	// Yaw
 	void RotateY(float angle);
 
+	void Roll(float angle);
+
 	// after modifying camera position/orientation, call to rebuild the view matrix
 	void UpdateViewMatrix();
 
