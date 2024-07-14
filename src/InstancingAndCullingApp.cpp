@@ -226,7 +226,7 @@ void InstancingAndCullingApp::UpdateObjectCBs()
 				localSpaceFrustum.CreateFromMatrix(localSpaceFrustum, camera.GetProj());
 				localSpaceFrustum.Transform(localSpaceFrustum, viewToLocal);
 
-				if (localSpaceFrustum.Contains(e->Bounds) != DirectX::DISJOINT)
+				if (localSpaceFrustum.Contains(e->Bounds) != DirectX::DISJOINT || (mFrustumCullingEnabled == false))
 				{
 					InstanceData data;
 					XMMATRIX texTransform = XMLoadFloat4x4(&instanceData[i].texTransform);
