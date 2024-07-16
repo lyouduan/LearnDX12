@@ -60,6 +60,9 @@
     <ClCompile Include="src\InstancingAndCullingApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\CubeMapApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\d3dx12.h">
@@ -119,6 +122,9 @@
     <ClInclude Include="src\InstancingAndCullingApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\CubeMapApp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl" />
@@ -130,6 +136,7 @@
     <None Include="shader\gaussion.hlsl" />
     <None Include="shader\Tessellation.hlsl" />
     <None Include="shader\instance.hlsl" />
+    <None Include="shader\skybox.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />

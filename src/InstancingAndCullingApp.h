@@ -8,7 +8,7 @@ enum RenderLayer : int
 	Opaque,
 	Transparent,
 	AlphaTest,
-	Box,
+	HightLight,
 	Count
 };
 struct RenderItem
@@ -19,6 +19,8 @@ struct RenderItem
 
 	UINT objCBIndex = -1;
 	D3D12_PRIMITIVE_TOPOLOGY primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	
+	bool Visible = true;
 
 	MeshGeometry* geo = nullptr;
 	Material* mat = nullptr;
@@ -51,6 +53,8 @@ private:
 	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 	void onKeybordInput(const GameTime& gt);
+	void Pick(int sx, int sy);
+
 
 	void UpdateObjectCBs();
 	void UpdateMainPassCB();
@@ -69,6 +73,7 @@ private:
 
 	void BuildMaterials();
 	void BuildSkullGeometry();
+	void BuildCarGeometry();
 	void BuildRenderItem();
 	void BuildPSO();
 	void DrawRenderItems(std::vector<RenderItem*>);
@@ -83,6 +88,7 @@ protected:
 	ComPtr<ID3DBlob> pixelShader;
 
 	std::vector<RenderItem*> ritemLayer[(int)RenderLayer::Count];
+	RenderItem* mPickedRitem = nullptr;
 
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> shaders;
 	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> psos;

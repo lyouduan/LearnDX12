@@ -20,6 +20,7 @@ bool InstancingAndCullingApp::Init(HINSTANCE hInstance, int nShowCmd)
 	BuildShadersAndInputLayout();
 	BuildShapeGeometry();
 	BuildSkullGeometry();
+	BuildCarGeometry();
 	BuildMaterials();
 	BuildRenderItem();
 
@@ -41,7 +42,7 @@ void InstancingAndCullingApp::Draw()
 {
 	auto currCmdAllocator = mCurrFrameResource->cmdAllocator;
 	ThrowIfFailed(currCmdAllocator->Reset());
-	ThrowIfFailed(cmdList->Reset(currCmdAllocator.Get(), pipelineState.Get()));
+	ThrowIfFailed(cmdList->Reset(currCmdAllocator.Get(), psos["opaque"].Get()));
 
 	cmdList->RSSetViewports(1, &viewPort);
 	cmdList->RSSetScissorRects(1, &scissorRect);
@@ -79,10 +80,11 @@ void InstancingAndCullingApp::Draw()
 	auto passCB = mCurrFrameResource->passCB->Resource();
 	cmdList->SetGraphicsRootConstantBufferView(0, passCB->GetGPUVirtualAddress());
 
-	cmdList->SetPipelineState(psos["opaque"].Get());
-
 	cmdList->SetGraphicsRootDescriptorTable(3, srvHeap->GetGPUDescriptorHandleForHeapStart());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
+
+	cmdList->SetPipelineState(psos["highlight"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::HightLight]);
 
 	auto trans2 = CD3DX12_RESOURCE_BARRIER::Transition(swapChainBuffer[ref_mCurrentBackBuffer].Get(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -131,9 +133,17 @@ void InstancingAndCullingApp::OnResize()
 
 void InstancingAndCullingApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
-	lastMousePos.x = x;
-	lastMousePos.y = y;
-	SetCapture(mhMainWnd);
+	if ((btnState & MK_LBUTTON) != 0)
+	{
+		lastMousePos.x = x;
+		lastMousePos.y = y;
+		SetCapture(mhMainWnd);
+	}
+	else if ((btnState & MK_RBUTTON) != 0)
+	{
+		Pick(x, y);
+	}
+	
 }
 
 void InstancingAndCullingApp::OnMouseUp(WPARAM btnState, int x, int y)
@@ -199,6 +209,83 @@ void InstancingAndCullingApp::onKeybordInput(const GameTime& gt)
 	sunPhi = MathHelper::Clamp(sunPhi, 0.1f, XM_PIDIV2);
 }
 
+void InstancingAndCullingApp::Pick(int sx, int sy)
+{
+	XMFLOAT4X4 P = camera.GetProj4x4f();
+	// Compute picking ray in view space.
+	float vx = (+2.0f * sx / width - 1.0f) / P(0, 0);
+	float vy = (-2.0f * sy / height + 1.0f) / P(1, 1);
+	XMVECTOR rayOrigin = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+	XMVECTOR rayDir = XMVectorSet(vx, vy, 1.0f, 0.0f);
+	XMMATRIX V = camera.GetView();
+	auto determinant = XMMatrixDeterminant(V);
+	XMMATRIX invView = XMMatrixInverse(&determinant, V);
+
+	mPickedRitem->Visible = false;
+
+	for (auto ri : ritemLayer[(int)RenderLayer::Opaque])
+	{
+		auto geo = ri->geo;
+
+		if (ri->Visible == false)
+			continue;
+
+		XMMATRIX W = XMLoadFloat4x4(&ri->world);
+		auto determinantW = XMMatrixDeterminant(W);
+		XMMATRIX invWorld= XMMatrixInverse(&determinantW, W);
+
+		XMMATRIX toLocal = XMMatrixMultiply(invView, invWorld);
+
+		rayOrigin = XMVector3TransformCoord(rayOrigin, toLocal);
+		rayDir = XMVector3TransformNormal(rayDir, toLocal);
+
+		// Make the ray direction unit length for the intersection tests.
+		rayDir = XMVector3Normalize(rayDir);
+
+		float tmin = 0.0f;
+		if (ri->Bounds.Intersects(rayOrigin, rayDir, tmin))
+		{
+			auto vertices = (Vertex*)geo->vertexBufferCpu->GetBufferPointer();
+			auto indices = (std::uint32_t*)geo->indexBufferCpu->GetBufferPointer();
+			UINT triCount = ri->indexCount / 3;
+
+			tmin = MathHelper::Infinity;
+
+			for (UINT i = 0; i < triCount; ++i)
+			{
+				UINT i0 = indices[i * 3 + 0];
+				UINT i1 = indices[i * 3 + 1];
+				UINT i2 = indices[i * 3 + 2];
+
+				XMVECTOR v0 = XMLoadFloat3(&vertices[i0].Pos);
+				XMVECTOR v1 = XMLoadFloat3(&vertices[i1].Pos);
+				XMVECTOR v2 = XMLoadFloat3(&vertices[i2].Pos);
+
+				float t = 0.0f;
+				if (TriangleTests::Intersects(rayOrigin, rayDir, v0, v1, v2, t))
+				{
+					if (t < tmin)
+					{
+						tmin = t;
+						UINT pickedTriangle = i;
+
+						mPickedRitem->Visible = true;
+						mPickedRitem->indexCount = 3;
+						mPickedRitem->baseVertexLocation = 0;
+
+						// Picked render item needs same world matrix as object picked.
+						mPickedRitem->world = ri->world;
+						mPickedRitem->NumFramesDirty = gNumFrameResources;
+
+						// Offset to the picked triangle in the mesh index buffer.
+						mPickedRitem->startIndexLocation = 3 * pickedTriangle;
+					}
+				}
+			}
+		}
+	}
+}
+
 void InstancingAndCullingApp::UpdateObjectCBs()
 {
 	auto currObjectSB = mCurrFrameResource->instanceBuffer.get();
@@ -207,12 +294,13 @@ void InstancingAndCullingApp::UpdateObjectCBs()
 	auto viewDeterminant = XMMatrixDeterminant(view);
 	XMMATRIX invView = XMMatrixInverse(&viewDeterminant, view);
 
+	UINT viesibleInstanceCount = 0;
 	for (auto& e : allRitems)
 	{
 		if (e->NumFramesDirty > 0)
 		{
 			auto& instanceData = e->Instances;
-			UINT viesibleInstanceCount = 0;
+
 			for (UINT i = 0; i < (UINT)instanceData.size(); i++)
 			{
 				XMMATRIX w = XMLoadFloat4x4(&instanceData[i].world);
@@ -743,11 +831,20 @@ void InstancingAndCullingApp::BuildMaterials()
 	skull->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	skull->roughness = 0.1f;
 
+	auto highLight = std::make_unique<Material>();
+	highLight->name = "highLight";
+	highLight->matCBIndex = 5;
+	highLight->diffuseSrvHeapIndex = 3;
+	highLight->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 0.0f, 0.5f);
+	highLight->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+	highLight->roughness = 0.3f;
+
 	materials[grid->name] = std::move(grid);
 	materials[sphere->name] = std::move(sphere);
 	materials[cylinder->name] = std::move(cylinder);
 	materials[box->name] = std::move(box);
 	materials[skull->name] = std::move(skull);
+	materials[highLight->name] = std::move(highLight);
 
 	matCount = materials.size();
 }
@@ -824,6 +921,11 @@ void InstancingAndCullingApp::BuildSkullGeometry()
 	auto geo = std::make_unique<MeshGeometry>();
 	geo->name = "skullGeo";
 
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->vertexBufferCpu));
+	CopyMemory(geo->vertexBufferCpu->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->indexBufferCpu));
+	CopyMemory(geo->indexBufferCpu->GetBufferPointer(), indices.data(), ibByteSize);
 	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
 	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
 
@@ -841,6 +943,102 @@ void InstancingAndCullingApp::BuildSkullGeometry()
 	geo->DrawArgs["skull"] = skullSubMesh;
 
 	geometries["skullGeo"] = std::move(geo);
+}
+
+void InstancingAndCullingApp::BuildCarGeometry()
+{
+	std::ifstream fin("./model/car.txt");
+
+	if (!fin)
+	{
+		MessageBox(0, L"File not found", 0, 0);
+		return;
+	}
+
+	UINT vertexCount = 0;
+	UINT triangleCount = 0;
+	std::string ignore;
+
+	fin >> ignore >> vertexCount;
+	fin >> ignore >> triangleCount;
+	fin >> ignore >> ignore >> ignore >> ignore;
+
+	XMFLOAT3 vMinf3(+MathHelper::Infinity, +MathHelper::Infinity, +MathHelper::Infinity);
+	XMFLOAT3 vMaxf3(-MathHelper::Infinity, -MathHelper::Infinity, -MathHelper::Infinity);
+
+	XMVECTOR vMin = XMLoadFloat3(&vMinf3);
+	XMVECTOR vMax = XMLoadFloat3(&vMaxf3);
+
+	std::vector<Vertex> vertices(vertexCount);
+	for (UINT i = 0; i < vertexCount; i++)
+	{
+		fin >> vertices[i].Pos.x >> vertices[i].Pos.y >> vertices[i].Pos.z; // position
+		fin >> vertices[i].Normal.x >> vertices[i].Normal.y >> vertices[i].Normal.z; // normal
+
+		XMVECTOR P = XMLoadFloat3(&vertices[i].Pos);
+
+		XMFLOAT3 spherePos;
+		XMStoreFloat3(&spherePos, XMVector3Normalize(P));
+		float theta = atan2f(spherePos.z, spherePos.x);
+
+		if (theta < 0.0f)
+			theta += XM_2PI;
+
+		float phi = acosf(spherePos.y);
+		float u = theta / (2.0f * XM_PI);
+		float v = phi / XM_PI;
+
+		vertices[i].Tex = { u ,v };
+		vMin = XMVectorMin(vMin, P);
+		vMax = XMVectorMax(vMax, P);
+	}
+
+	DirectX::BoundingBox bounds;
+	XMStoreFloat3(&bounds.Center, 0.5 * (vMax + vMin));
+	XMStoreFloat3(&bounds.Extents, 0.5 * (vMax - vMin));
+
+	fin >> ignore;
+	fin >> ignore;
+	fin >> ignore;
+
+	std::vector<std::int32_t> indices(triangleCount * 3);
+	for (UINT i = 0; i < triangleCount; i++)
+	{
+		fin >> indices[i * 3 + 0] >> indices[i * 3 + 1] >> indices[i * 3 + 2];
+	}
+
+	fin.close();
+
+
+	const UINT vbByteSize = vertices.size() * sizeof(Vertex);
+	const UINT ibByteSize = indices.size() * sizeof(std::int32_t);
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->name = "carGeo";
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->vertexBufferCpu));
+	CopyMemory(geo->vertexBufferCpu->GetBufferPointer(), vertices.data(), vbByteSize);
+
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->indexBufferCpu));
+	CopyMemory(geo->indexBufferCpu->GetBufferPointer(), indices.data(), ibByteSize);
+
+	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
+	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
+
+	geo->vertexBufferByteSize = vbByteSize;
+	geo->vertexByteStride = sizeof(Vertex);
+	geo->indexBufferByteSize = ibByteSize;
+	geo->indexFormat = DXGI_FORMAT_R32_UINT;
+
+	SubmeshGeometry skullSubMesh;
+	skullSubMesh.BaseVertexLocation = 0;
+	skullSubMesh.StartIndexLocation = 0;
+	skullSubMesh.IndexCount = (UINT)indices.size();
+	skullSubMesh.Bounds = bounds;
+
+	geo->DrawArgs["car"] = skullSubMesh;
+
+	geometries["carGeo"] = std::move(geo);
 }
 
 void InstancingAndCullingApp::BuildPSO()
@@ -873,36 +1071,84 @@ void InstancingAndCullingApp::BuildPSO()
 
 	psos["opaque"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psos["opaque"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC highlightPsoDesc = psoDesc;
+	highlightPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+	// Standard transparency blending.
+	D3D12_RENDER_TARGET_BLEND_DESC transparencyBlendDesc;
+	transparencyBlendDesc.BlendEnable = true;
+	transparencyBlendDesc.LogicOpEnable = false;
+	transparencyBlendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	transparencyBlendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	transparencyBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;
+	transparencyBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+	transparencyBlendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
+	transparencyBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	transparencyBlendDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
+	transparencyBlendDesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+	highlightPsoDesc.BlendState.RenderTarget[0] = transparencyBlendDesc;
+	psos["highlight"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&highlightPsoDesc, IID_PPV_ARGS(&psos["highlight"])));
 }
 
 void InstancingAndCullingApp::BuildRenderItem()
 {
+	auto carRitem = std::make_unique<RenderItem>();
+	XMStoreFloat4x4(&carRitem->world, XMMatrixScaling(0.5f, 0.5f, 0.5f) * XMMatrixTranslation(0.0f, 1.0f, 0.0f));
+	carRitem->NumFramesDirty = gNumFrameResources;
+	carRitem->objCBIndex = 0;//skull常量数据（world矩阵）在objConstantBuffer索引1上
+	carRitem->mat = materials["skull"].get();
+	carRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	carRitem->geo = geometries["carGeo"].get();
+	carRitem->instanceCount = 0; // 实例化个数
+	carRitem->indexCount = carRitem->geo->DrawArgs["car"].IndexCount;
+	carRitem->baseVertexLocation = carRitem->geo->DrawArgs["car"].BaseVertexLocation;
+	carRitem->startIndexLocation = carRitem->geo->DrawArgs["car"].StartIndexLocation;
+	carRitem->Bounds = carRitem->geo->DrawArgs["car"].Bounds;
 
-	auto skullRitem = std::make_unique<RenderItem>();
-	XMStoreFloat4x4(&skullRitem->world, XMMatrixScaling(0.5f, 0.5f, 0.5f) * XMMatrixTranslation(0.0f, 1.0f, 0.0f));
-	skullRitem->NumFramesDirty = gNumFrameResources;
-	skullRitem->objCBIndex = 0;//skull常量数据（world矩阵）在objConstantBuffer索引1上
-	skullRitem->mat = materials["skull"].get();
-	skullRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	skullRitem->geo = geometries["skullGeo"].get();
-	skullRitem->instanceCount = 0; // 实例化个数
-	skullRitem->indexCount = skullRitem->geo->DrawArgs["skull"].IndexCount;
-	skullRitem->baseVertexLocation = skullRitem->geo->DrawArgs["skull"].BaseVertexLocation;
-	skullRitem->startIndexLocation = skullRitem->geo->DrawArgs["skull"].StartIndexLocation;
-	skullRitem->Bounds = skullRitem->geo->DrawArgs["skull"].Bounds;
-
-	mInstanceCount = 5*5;
-	skullRitem->Instances.resize(mInstanceCount);
+	mInstanceCount = 1;
+	carRitem->Instances.resize(mInstanceCount);
 	for (int i = 0; i < mInstanceCount; i++)
 	{
-		XMStoreFloat4x4(&skullRitem->Instances[i].world, XMMatrixTranslation(5.0f * i, 0.0f, 5.0f * i ));
-		skullRitem->Instances[i].texTransform = MathHelper::Identity4x4();
-		skullRitem->Instances[i].MaterialIndex = i % 4;
+		XMStoreFloat4x4(&carRitem->Instances[i].world, XMMatrixTranslation(5.0f * i, 0.0f, 5.0f * (i + 1)));
+		carRitem->Instances[i].texTransform = MathHelper::Identity4x4();
+		carRitem->Instances[i].MaterialIndex = carRitem->mat->diffuseSrvHeapIndex;
+	}
+	ritemLayer[(int)RenderLayer::Opaque].push_back(carRitem.get());
+
+	auto pickedRitem = std::make_unique<RenderItem>();
+	pickedRitem->world = MathHelper::Identity4x4();
+	pickedRitem->NumFramesDirty = gNumFrameResources;
+	pickedRitem->texTransform = MathHelper::Identity4x4();
+	pickedRitem->objCBIndex = 1;
+	pickedRitem->instanceCount = 0; 
+	pickedRitem->mat = materials["highLight"].get();
+	pickedRitem->geo = geometries["carGeo"].get();
+	pickedRitem->Bounds = pickedRitem->geo->DrawArgs["car"].Bounds;
+	pickedRitem->primitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+
+	pickedRitem->indexCount = 0;
+	pickedRitem->startIndexLocation = 0;
+	pickedRitem->baseVertexLocation = 0;
+
+	pickedRitem->Instances.resize(mInstanceCount);
+	for (int i = 0; i < mInstanceCount; i++)
+	{
+		XMStoreFloat4x4(&pickedRitem->Instances[i].world, XMMatrixTranslation(5.0f * i, 0.0f, 5.0f * (i + 1)));
+		pickedRitem->Instances[i].texTransform = MathHelper::Identity4x4();
+		pickedRitem->Instances[i].MaterialIndex = pickedRitem->mat->diffuseSrvHeapIndex;
 	}
 
-	ritemLayer[(int)RenderLayer::Opaque].push_back(skullRitem.get());
-	allRitems.push_back(std::move(skullRitem));
+	pickedRitem->Visible = false;
 
+	mPickedRitem = pickedRitem.get();
+
+	ritemLayer[(int)RenderLayer::HightLight].push_back(pickedRitem.get());
+
+	allRitems.push_back(std::move(carRitem));
+	allRitems.push_back(std::move(pickedRitem));
 }
 
 void InstancingAndCullingApp::DrawRenderItems(std::vector<RenderItem*> ritems)
@@ -912,6 +1158,9 @@ void InstancingAndCullingApp::DrawRenderItems(std::vector<RenderItem*> ritems)
 	for (size_t i = 0; i < ritems.size(); i++)
 	{
 		auto ritem = ritems[i];
+		
+		if (ritem->Visible == false)
+			continue;
 
 		cmdList->IASetVertexBuffers(0, 1, get_rvalue_ptr(ritem->geo->VertexBufferView()));
 		cmdList->IASetIndexBuffer(get_rvalue_ptr(ritem->geo->IndexBufferView()));

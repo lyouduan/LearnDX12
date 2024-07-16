@@ -65,17 +65,18 @@ cbuffer cbPerObject : register(b1)
     float4 gAmbientLight;
     Light gLights[MaxLights];
 }
+TextureCube gCubeMap : register(t0); //所有漫反射贴图
 
-Texture2D gDiffuseMap[3] : register(t0); //所有漫反射贴图
+Texture2D gDiffuseMap[4] : register(t1); //所有漫反射贴图
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 
 //6个不同类型的采样器
 SamplerState gSamPointWrap : register(s0);
 SamplerState gSamPointClamp : register(s1);
-SamplerState gSamLinearWarp : register(s2);
+SamplerState gSamLinearWrap : register(s2);
 SamplerState gSamLinearClamp : register(s3);
-SamplerState gSamAnisotropicWarp : register(s4);
+SamplerState gSamAnisotropicWrap : register(s4);
 SamplerState gSamAnisotropicClamp : register(s5);
 
 float CalcAttenuation(float d, float falloffStart, float falloffEnd);
@@ -128,7 +129,7 @@ float4 PSMain(VertexOut pin) : SV_Target
     float roughness = matData.Roughness;
     uint diffuseTexIndex = matData.DiffuseMapIndex;
     
-    diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gSamLinearWarp, pin.Tex);
+    diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gSamLinearWrap, pin.Tex);
     
     pin.WorldNormal = normalize(pin.WorldNormal);
     float3 toEyeW = normalize(gEyePosW - pin.WorldPos);
@@ -141,6 +142,12 @@ float4 PSMain(VertexOut pin) : SV_Target
         pin.WorldNormal, toEyeW, shadowFactor);
     
     float4 litColor = ambient + directLight;
+    
+    float3 r = reflect(-toEyeW, pin.WorldNormal);
+    float4 reflectionColor = gCubeMap.Sample(gSamLinearWrap, r);
+    float3 fresnelFactor = SchlickFresnel(fresnelR0, pin.WorldNormal, r);
+    litColor.rgb += (1-roughness) * fresnelFactor * reflectionColor.rgb;
+    
     litColor.a = diffuseAlbedo.a;
     
     return litColor;

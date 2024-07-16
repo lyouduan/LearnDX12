@@ -1,6 +1,11 @@
 #include "./src/stdafx.h"
 
-#define Instance
+#define CubeMap
+
+#ifdef CubeMap
+#include "./src/CubeMapApp.h"
+#define APP CubeMapApp
+#endif // 
 
 #ifdef Instance
 #include "./src/InstancingAndCullingApp.h"
