@@ -31,10 +31,9 @@ public:
 	void SetMSAA();
 	void CreateCommandObject();
 	void CreateSwapChain();
-	void CreateDescriptorHeap();
-
-	void CreateRTV();
-	void CreateDSV();
+	virtual void CreateDescriptorHeap();
+	virtual void CreateRTV();
+	virtual void CreateDSV();
 	void CreateViewPortAndScissorRect();
 
 	void FlushCmdQueue();
@@ -83,4 +82,5 @@ protected:
 	UINT srvDescriptorSize = 0;
 	UINT mCurrentBackBuffer = 0;
 
+	DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 };

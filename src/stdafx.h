@@ -28,3 +28,4 @@
 #include "Wave.h"
 #include "DDSTextureLoader.h"
 #include "Camera.h"
+#include "CubeRenderTarget.h"

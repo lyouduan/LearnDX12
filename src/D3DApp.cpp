@@ -391,12 +391,12 @@ void D3DApp::CreateDSV()
 	dsvResourceDesc.MipLevels = 1;
 	dsvResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 	dsvResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-	dsvResourceDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	dsvResourceDesc.Format = mDepthStencilFormat;
 	dsvResourceDesc.SampleDesc.Count = 1;
 	dsvResourceDesc.SampleDesc.Quality = 0;
 	
 	CD3DX12_CLEAR_VALUE optClear;
-	optClear.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	optClear.Format = mDepthStencilFormat;
 	optClear.DepthStencil.Depth = 1;
 	optClear.DepthStencil.Stencil = 0;
 

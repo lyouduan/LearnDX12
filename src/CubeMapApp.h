@@ -3,12 +3,15 @@
 using namespace DirectX::PackedVector;
 
 const int gNumFrameResources = 4;
+const UINT CubeMapSize = 512;
+
 enum RenderLayer : int
 {
 	Opaque,
 	Transparent,
 	AlphaTest,
 	SkyBox,
+	OpaqueDynamicReflectors,
 	Count
 };
 struct RenderItem
@@ -46,11 +49,15 @@ private:
 	virtual void OnMouseDown(WPARAM btnState, int x, int y) override;
 	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
+
+	virtual void CreateDescriptorHeap() override;
+
 	void onKeybordInput(const GameTime& gt);
 
 	void UpdateObjectCBs();
 	void UpdateMainPassCB();
 	void UpdateMatCB();
+	void UpdateCubeMapFacePassCBs();
 
 	void loadTexutres();
 
@@ -59,6 +66,9 @@ private:
 
 	void BuildDescriptorHeaps();
 	void BuildConstantBuffers();
+	void BuildShaderResourceView();
+	void BuildCubeDepthStencil();
+	void BuildCubeFaceCamera(float x, float y, float z);
 	void BuildRootSignature();
 	void BuildShadersAndInputLayout();
 	void BuildShapeGeometry();
@@ -70,6 +80,8 @@ private:
 	void BuildPSO();
 	void DrawRenderItems(std::vector<RenderItem*>);
 	void BuildFrameResources();
+	void DrawSceneToCubeMap();
+
 protected:
 	ComPtr<ID3D12RootSignature> rootSignature;
 	ComPtr<ID3D12PipelineState> pipelineState;
@@ -93,6 +105,12 @@ protected:
 	UINT objCount = 0;
 	UINT matCount = 0;
 	UINT mSkyTexHeapIndex = 0;
+	UINT mDynamicTexHeapIndex = 0;
+
+	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
+	ComPtr<ID3D12Resource> mCubeDepthStencilBuffer;
 
 	ComPtr<ID3D12DescriptorHeap> cbvHeap;
 	ComPtr<ID3D12DescriptorHeap> srvHeap;
@@ -113,5 +131,6 @@ protected:
 	float sunPhi = XM_PIDIV4;
 
 	Camera camera;
+	Camera mCubeMapCamera[6];
 };
 
