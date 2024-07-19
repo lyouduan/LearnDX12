@@ -15,6 +15,7 @@ struct Vertex
 	DirectX::XMFLOAT3 Pos;
 	DirectX::XMFLOAT3 Normal;
 	DirectX::XMFLOAT2 Tex;
+	DirectX::XMFLOAT3 TangentU;
 
 };
 
@@ -23,14 +24,14 @@ struct MaterialData
 	DirectX::XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
 	DirectX::XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 
-	float Roughness = 64.0f;
+	float Roughness = 0.5;
 
 	DirectX::XMFLOAT4X4 MatFransform = MathHelper::Identity4x4();
 
 	UINT DiffuseMapIndex = 0;
+	UINT NormalMapIndex = 0;
 	UINT MaterialPad0;
 	UINT MaterialPad1;
-	UINT MaterialPad2;
 };
 
 struct InstanceData
@@ -76,6 +77,11 @@ struct MatConstants
 	float roughness = 0.25f;//²ÄÖÊµÄ´Ö²Ú¶È
 
 	XMFLOAT4X4 matTransform = MathHelper::Identity4x4();
+
+	UINT DiffuseMapIndex = 0;
+	UINT NormalMapIndex = 0;
+	UINT MaterialPad0;
+	UINT MaterialPad1;
 };
 
 

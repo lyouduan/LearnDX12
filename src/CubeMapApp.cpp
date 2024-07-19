@@ -14,6 +14,7 @@ bool CubeMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 		return false;
 	ThrowIfFailed(cmdList->Reset(cmdAllocator.Get(), nullptr));
 
+	// set cameras of six cube face 
 	camera.SetPosition(0.0f, 2.0f, -20.0f);
 	BuildCubeFaceCamera(0.0, 2.0, 0.0);
 	mDynamicCubeMap = std::make_unique<CubeRenderTarget>(device.Get(), 
@@ -58,14 +59,13 @@ void CubeMapApp::Draw()
 
 	cmdList->SetGraphicsRootSignature(rootSignature.Get());
 
+	// material buffer
 	auto matSB = mCurrFrameResource->matBuffer->Resource();
 	cmdList->SetGraphicsRootShaderResourceView(2, matSB->GetGPUVirtualAddress());
-
 	// cubemap srv
 	CD3DX12_GPU_DESCRIPTOR_HANDLE skyTexDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
 	skyTexDescriptor.Offset(mSkyTexHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
-
 	// texture2D srv
 	cmdList->SetGraphicsRootDescriptorTable(4, srvHeap->GetGPUDescriptorHandleForHeapStart());
 
@@ -74,12 +74,15 @@ void CubeMapApp::Draw()
 
 	cmdList->RSSetViewports(1, &viewPort);
 	cmdList->RSSetScissorRects(1, &scissorRect);
+
 	UINT& ref_mCurrentBackBuffer = mCurrentBackBuffer;
-	auto trans1 = CD3DX12_RESOURCE_BARRIER::Transition(
-		swapChainBuffer[ref_mCurrentBackBuffer].Get(),
-		D3D12_RESOURCE_STATE_PRESENT,//转换资源为后台缓冲区资源
-		D3D12_RESOURCE_STATE_RENDER_TARGET);//从呈现到渲染目标转换
-	cmdList->ResourceBarrier(1, &trans1);
+	cmdList->ResourceBarrier(
+		1,
+		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
+			swapChainBuffer[ref_mCurrentBackBuffer].Get(),
+			D3D12_RESOURCE_STATE_PRESENT,//转换资源为后台缓冲区资源
+			D3D12_RESOURCE_STATE_RENDER_TARGET))//从呈现到渲染目标转换
+	);
 
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHeap->GetCPUDescriptorHandleForHeapStart(), ref_mCurrentBackBuffer, rtvDescriptorSize);
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -105,18 +108,24 @@ void CubeMapApp::Draw()
 	CD3DX12_GPU_DESCRIPTOR_HANDLE dynamicTexDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
 	dynamicTexDescriptor.Offset(mDynamicTexHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(3, dynamicTexDescriptor);
+	
 	DrawRenderItems(ritemLayer[(int)RenderLayer::OpaqueDynamicReflectors]);
 
 	// static cubemap
 	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
 
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
 	cmdList->SetPipelineState(psos["sky"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::SkyBox]);
 
-	auto trans2 = CD3DX12_RESOURCE_BARRIER::Transition(swapChainBuffer[ref_mCurrentBackBuffer].Get(),
-		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-	cmdList->ResourceBarrier(1, &trans2);//从渲染目标到呈现
+	cmdList->ResourceBarrier(
+		1,
+		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
+			swapChainBuffer[ref_mCurrentBackBuffer].Get(),
+			D3D12_RESOURCE_STATE_RENDER_TARGET,
+			D3D12_RESOURCE_STATE_PRESENT))//从渲染目标到呈现
+	);
+
 	ThrowIfFailed(cmdList->Close());
 
 	ID3D12CommandList* cmdLists[] = { cmdList.Get() };
@@ -326,9 +335,12 @@ void CubeMapApp::UpdateMatCB()
 			matData.DiffuseAlbedo = mat->diffuseAlbedo;
 			matData.FresnelR0 = mat->fresnelR0;
 			matData.Roughness = mat->roughness;
+
 			XMMATRIX matTransform = XMLoadFloat4x4(&mat->matTransform);
 			XMStoreFloat4x4(&matData.MatFransform, XMMatrixTranspose(matTransform));
+
 			matData.DiffuseMapIndex = mat->diffuseSrvHeapIndex;
+			matData.NormalMapIndex = mat->normalSrvHeapIndex;
 
 			mCurrFrameResource->matBuffer->CopyData(mat->matCBIndex, matData);
 			mat->numFramesDirty--;
@@ -359,7 +371,7 @@ void CubeMapApp::loadTexutres()
 {
 
 	auto bricksTex = std::make_unique<Texture>();
-	bricksTex->Filename = L"./model/bricks.dds";
+	bricksTex->Filename = L"./model/bricks2.dds";
 	bricksTex->name = "bricksTex";
 
 	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
@@ -429,13 +441,54 @@ void CubeMapApp::loadTexutres()
 		skyTex->Resource,
 		skyTex->UploadHeap
 	));
-
 	textures[bricksTex->name] = std::move(bricksTex);
 	textures[stoneTex->name] = std::move(stoneTex);
 	textures[tileTex->name] = std::move(tileTex);
 	textures[whiteTex->name] = std::move(whiteTex);
 	textures[iceTex->name] = std::move(iceTex);
 	textures[skyTex->name] = std::move(skyTex);
+
+
+	// normal map
+	auto default_nmap = std::make_unique<Texture>();
+	default_nmap->Filename = L"./model/default_nmap.dds";
+	default_nmap->name = "default_nmap";
+
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
+		device.Get(),
+		cmdList.Get(),
+		default_nmap->Filename.c_str(),
+		default_nmap->Resource,
+		default_nmap->UploadHeap
+	));
+
+	auto bricks_nmap = std::make_unique<Texture>();
+	bricks_nmap->Filename = L"./model/bricks2_nmap.dds";
+	bricks_nmap->name = "bricks_nmap";
+
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
+		device.Get(),
+		cmdList.Get(),
+		bricks_nmap->Filename.c_str(),
+		bricks_nmap->Resource,
+		bricks_nmap->UploadHeap
+	));
+
+	auto tile_nmap = std::make_unique<Texture>();
+	tile_nmap->Filename = L"./model/tile_nmap.dds";
+	tile_nmap->name = "tile_nmap";
+
+	ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(
+		device.Get(),
+		cmdList.Get(),
+		tile_nmap->Filename.c_str(),
+		tile_nmap->Resource,
+		tile_nmap->UploadHeap
+	));
+
+	textures[default_nmap->name] = std::move(default_nmap);
+	textures[bricks_nmap->name] = std::move(bricks_nmap);
+	textures[tile_nmap->name] = std::move(tile_nmap);
 }
 
 ComPtr<ID3D12Resource> CubeMapApp::CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer)
@@ -543,8 +596,7 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> CubeMapApp::GetStaticSamplers()
 
 void CubeMapApp::BuildDescriptorHeaps()
 {
-	
-	
+	// move to build buffers/heaps together
 }
 
 void CubeMapApp::BuildConstantBuffers()
@@ -602,7 +654,7 @@ void CubeMapApp::BuildShaderResourceView()
 {
 	// create the SRV heap
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-	srvHeapDesc.NumDescriptors = 7;
+	srvHeapDesc.NumDescriptors = 10;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	srvHeapDesc.NodeMask = 0;
@@ -615,6 +667,9 @@ void CubeMapApp::BuildShaderResourceView()
 	auto tileTex = textures["tileTex"]->Resource;
 	auto whiteTex = textures["whiteTex"]->Resource;
 	auto iceTex = textures["iceTex"]->Resource;
+	auto bricks_nmap = textures["bricks_nmap"]->Resource; // 5
+	auto tile_nmap = textures["tile_nmap"]->Resource; // 6
+	auto default_nmap = textures["default_nmap"]->Resource; //7
 	auto skyTex = textures["skyTex"]->Resource;
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -628,26 +683,46 @@ void CubeMapApp::BuildShaderResourceView()
 
 	srvHandle.Offset(1, srvDescriptorSize);
 	srvDesc.Format = stoneTex->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = stoneTex->GetDesc().MipLevels;
 	device->CreateShaderResourceView(stoneTex.Get(), &srvDesc, srvHandle);
 
 	srvHandle.Offset(1, srvDescriptorSize);
 	srvDesc.Format = tileTex->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = tileTex->GetDesc().MipLevels;
 	device->CreateShaderResourceView(tileTex.Get(), &srvDesc, srvHandle);
 
 	srvHandle.Offset(1, srvDescriptorSize);
 	srvDesc.Format = whiteTex->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = whiteTex->GetDesc().MipLevels;
 	device->CreateShaderResourceView(whiteTex.Get(), &srvDesc, srvHandle);
 
 	srvHandle.Offset(1, srvDescriptorSize);
 	srvDesc.Format = iceTex->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = iceTex->GetDesc().MipLevels;
 	device->CreateShaderResourceView(iceTex.Get(), &srvDesc, srvHandle);
+
+	// normal map 5
+	srvHandle.Offset(1, srvDescriptorSize);
+	srvDesc.Format = bricks_nmap->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = bricks_nmap->GetDesc().MipLevels;
+	device->CreateShaderResourceView(bricks_nmap.Get(), &srvDesc, srvHandle);
+	//6
+	srvHandle.Offset(1, srvDescriptorSize);
+	srvDesc.Format = tile_nmap->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = tile_nmap->GetDesc().MipLevels;
+	device->CreateShaderResourceView(tile_nmap.Get(), &srvDesc, srvHandle);
+	//7
+	srvHandle.Offset(1, srvDescriptorSize);
+	srvDesc.Format = default_nmap->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = default_nmap->GetDesc().MipLevels;
+	device->CreateShaderResourceView(default_nmap.Get(), &srvDesc, srvHandle);
 
 	srvHandle.Offset(1, srvDescriptorSize);
 	srvDesc.Format = skyTex->GetDesc().Format;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
 	device->CreateShaderResourceView(skyTex.Get(), &srvDesc, srvHandle);
 
-	mSkyTexHeapIndex = 5;
+	mSkyTexHeapIndex = 8;
 	mDynamicTexHeapIndex = mSkyTexHeapIndex + 1;
 
 	auto srvCpuStart = srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -751,7 +826,7 @@ void CubeMapApp::BuildRootSignature()
 	CD3DX12_DESCRIPTOR_RANGE srvTable0;
 	srvTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
 	CD3DX12_DESCRIPTOR_RANGE srvTable1;
-	srvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 5, 1, 0);
+	srvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 8, 1, 0);
 
 	slotRootParameter[0].InitAsConstantBufferView(0);
 	slotRootParameter[1].InitAsConstantBufferView(1);
@@ -791,7 +866,8 @@ void CubeMapApp::BuildShadersAndInputLayout()
 	{
 		  { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		  { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		  { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		  { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		  { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
 	shaders["opaqueVS"] = CompileShader(std::wstring(L"shader/column.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
@@ -870,18 +946,21 @@ void CubeMapApp::BuildShapeGeometry()
 		vertices[k].Pos = box.Vertices[i].Position;
 		vertices[k].Normal = box.Vertices[i].Normal;
 		vertices[k].Tex = box.Vertices[i].TexC;
+		vertices[k].TangentU = box.Vertices[i].TangentU;
 	}
 	for (size_t i = 0; i < grid.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = grid.Vertices[i].Position;
 		vertices[k].Normal = grid.Vertices[i].Normal;
 		vertices[k].Tex = grid.Vertices[i].TexC;
+		vertices[k].TangentU = grid.Vertices[i].TangentU;
 	}
 	for (size_t i = 0; i < sphere.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = sphere.Vertices[i].Position;
 		vertices[k].Normal = sphere.Vertices[i].Normal;
 		vertices[k].Tex = sphere.Vertices[i].TexC;
+		vertices[k].TangentU = sphere.Vertices[i].TangentU;
 	}
 
 	for (size_t i = 0; i < cylinder.Vertices.size(); ++i, ++k)
@@ -889,12 +968,14 @@ void CubeMapApp::BuildShapeGeometry()
 		vertices[k].Pos = cylinder.Vertices[i].Position;
 		vertices[k].Normal = cylinder.Vertices[i].Normal;
 		vertices[k].Tex = cylinder.Vertices[i].TexC;
+		vertices[k].TangentU = cylinder.Vertices[i].TangentU;
 	}
 	for (size_t i = 0; i < gsSpehre.Vertices.size(); ++i, ++k)
 	{
 		vertices[k].Pos = gsSpehre.Vertices[i].Position;
 		vertices[k].Normal = gsSpehre.Vertices[i].Normal;
 		vertices[k].Tex = gsSpehre.Vertices[i].TexC;
+		vertices[k].TangentU = gsSpehre.Vertices[i].TangentU;
 	}
 
 	std::vector<std::uint16_t> indices;
@@ -939,6 +1020,7 @@ void CubeMapApp::BuildSkySphereGeometry()
 		vertices[i].Pos = skySphere.Vertices[i].Position;
 		vertices[i].Normal = skySphere.Vertices[i].Normal;
 		vertices[i].Tex = skySphere.Vertices[i].TexC;
+		vertices[i].TangentU = skySphere.Vertices[i].TangentU;
 	}
 
 	std::vector<std::uint16_t> indices = skySphere.GetIndices16();
@@ -979,6 +1061,7 @@ void CubeMapApp::BuildMaterials()
 	grid->name = "grid";
 	grid->matCBIndex = 0;
 	grid->diffuseSrvHeapIndex = 2;
+	grid->normalSrvHeapIndex = 6;
 	grid->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	grid->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	grid->roughness = 0.8f;
@@ -987,6 +1070,7 @@ void CubeMapApp::BuildMaterials()
 	sphere->name = "sphere";
 	sphere->matCBIndex = 1;
 	sphere->diffuseSrvHeapIndex = 1;
+	sphere->normalSrvHeapIndex = 7;
 	sphere->diffuseAlbedo = XMFLOAT4(0.5f, 0.5f, 0.5f, 1.0f);
 	sphere->fresnelR0 = XMFLOAT3(0.95f, 0.95f, 0.95f);
 	sphere->roughness = 0.1f;
@@ -994,15 +1078,17 @@ void CubeMapApp::BuildMaterials()
 	auto cylinder = std::make_unique<Material>();
 	cylinder->name = "cylinder";
 	cylinder->matCBIndex = 2;
-	cylinder->diffuseSrvHeapIndex = 1;
+	cylinder->diffuseSrvHeapIndex = 0;
+	cylinder->normalSrvHeapIndex = 5;
 	cylinder->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	cylinder->fresnelR0 = XMFLOAT3(0.5f, 0.5f, 0.5f);
-	cylinder->roughness = 0.2f;
+	cylinder->fresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
+	cylinder->roughness = 0.8f;
 
 	auto box = std::make_unique<Material>();
 	box->name = "box";
 	box->matCBIndex = 3;
 	box->diffuseSrvHeapIndex = 1;
+	box->normalSrvHeapIndex = 7;
 	box->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	box->fresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
 	box->roughness = 0.8f;
@@ -1011,6 +1097,7 @@ void CubeMapApp::BuildMaterials()
 	skull->name = "skull";
 	skull->matCBIndex = 4;
 	skull->diffuseSrvHeapIndex = 3;
+	skull->normalSrvHeapIndex = 7;
 	skull->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	skull->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	skull->roughness = 0.3f;
@@ -1019,7 +1106,8 @@ void CubeMapApp::BuildMaterials()
 	mirror->name = "mirror";
 	mirror->matCBIndex = 5;
 	mirror->diffuseSrvHeapIndex = 4;
-	mirror->diffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+	mirror->normalSrvHeapIndex = 7;
+	mirror->diffuseAlbedo = XMFLOAT4(0.5f, 0.5f, 0.5f, 1.0f);
 	mirror->fresnelR0 = XMFLOAT3(0.95f, 0.95f, 0.95f);
 	mirror->roughness = 0.1f;
 
@@ -1027,6 +1115,7 @@ void CubeMapApp::BuildMaterials()
 	sky->name = "sky";
 	sky->matCBIndex = 6;
 	sky->diffuseSrvHeapIndex = 5;
+	sky->normalSrvHeapIndex = 7;
 	sky->diffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 	sky->fresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
 	sky->roughness = 0.1f;
@@ -1166,7 +1255,7 @@ void CubeMapApp::BuildRenderItem()
 
 	auto gridRitem = std::make_unique<RenderItem>();
 	gridRitem->world = MathHelper::Identity4x4();
-	XMStoreFloat4x4(&gridRitem->texTransform, XMMatrixScaling(7.0f, 7.f, 1.0f));
+	XMStoreFloat4x4(&gridRitem->texTransform, XMMatrixScaling(8.0f, 8.f, 1.0f));
 	gridRitem->NumFramesDirty = gNumFrameResources;
 	gridRitem->objCBIndex = 1;
 	gridRitem->mat = materials["grid"].get();
@@ -1233,7 +1322,7 @@ void CubeMapApp::BuildRenderItem()
 		XMMATRIX rightSphereWorld = XMMatrixTranslation(+5.0f, 3.5f, -10.0f + i * 5.0f);
 
 		XMStoreFloat4x4(&(leftCylRitem->world), leftCylWorld);
-		XMStoreFloat4x4(&leftCylRitem->texTransform, XMMatrixScaling(7.0f, 7.f, 1.0f));
+		XMStoreFloat4x4(&leftCylRitem->texTransform, XMMatrixScaling(1.0f, 1.f, 1.0f));
 		leftCylRitem->NumFramesDirty = gNumFrameResources;
 		leftCylRitem->objCBIndex = objCBIndex++;
 		leftCylRitem->mat = materials["cylinder"].get();
@@ -1244,7 +1333,7 @@ void CubeMapApp::BuildRenderItem()
 		leftCylRitem->startIndexLocation = leftCylRitem->geo->DrawArgs["cylinder"].StartIndexLocation;
 
 		XMStoreFloat4x4(&rightCylRitem->world, rightCylWorld);
-		XMStoreFloat4x4(&rightCylRitem->texTransform, XMMatrixScaling(7.0f, 7.f, 1.0f));
+		XMStoreFloat4x4(&rightCylRitem->texTransform, XMMatrixScaling(1.0f, 1.f, 1.0f));
 		rightCylRitem->NumFramesDirty = gNumFrameResources;
 		rightCylRitem->objCBIndex = objCBIndex++;
 		rightCylRitem->mat = materials["cylinder"].get();

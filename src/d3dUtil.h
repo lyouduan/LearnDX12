@@ -109,6 +109,7 @@ struct Material
     int numFramesDirty = 4; // 更新脏数据标志
 
     int diffuseSrvHeapIndex = -1;
+    int normalSrvHeapIndex = -1;
 
     XMFLOAT4 diffuseAlbedo = { 1.0, 1.0, 1.0, 1.0 };
     XMFLOAT3 fresnelR0 = { 0.01, 0.01, 0.01 };

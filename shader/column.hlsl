@@ -36,9 +36,9 @@ struct MaterialData
     float Roughness;
     float4x4 MatTransform;
     uint DiffuseMapIndex;
+    uint NormalMapIndex;
     uint MatPad0;
     uint MatPad1;
-    uint MatPad2;
 };
 cbuffer cbPerObject : register(b0)
 {
@@ -88,11 +88,15 @@ float3 ComputeSpotLight(Light L, Material mat, float3 pos, float3 normal, float3
 float4 ComputeLighting(Light gLights[MaxLights], Material mat,
                        float3 pos, float3 normal, float3 toEye,
                        float3 shadowFactor);
+
+float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW);
+
 struct VertexIn
 {
     float3 PosL : POSITION;
     float3 Normal : NORMAL;
     float2 Tex : TEXCOORD;
+    float3 Tangent : TANGENT;
 };
 
 struct VertexOut
@@ -101,6 +105,7 @@ struct VertexOut
     float3 WorldPos : POSITION;
     float3 WorldNormal : NORMAL;
     float2 Tex : TEXCOORD;
+    float3 TangentW : TANGENT;
 };
 
 VertexOut VSMain(VertexIn vin)
@@ -115,8 +120,12 @@ VertexOut VSMain(VertexIn vin)
     // æ˘‘»Àı∑≈
     vout.WorldNormal = mul(vin.Normal, (float3x3) world);
     
-    float4 texCoord = mul(float4(vin.Tex, 0.0f, 1.0f), texTransform);
-    vout.Tex = texCoord.xy;
+    MaterialData matData = gMaterialData[gMaterialIndex];
+    float4 texC = mul(float4(vin.Tex, 0.0f, 1.0f), texTransform);
+    vout.Tex = texC.xy;
+    
+    vout.TangentW = mul(vin.Tangent, (float3x3) world);
+    
     return vout;
 }
 
@@ -128,10 +137,19 @@ float4 PSMain(VertexOut pin) : SV_Target
     float3 fresnelR0 = matData.FresnelR0;
     float roughness = matData.Roughness;
     uint diffuseTexIndex = matData.DiffuseMapIndex;
+    uint normalMapIndex = matData.NormalMapIndex;
     
     diffuseAlbedo *= gDiffuseMap[diffuseTexIndex].Sample(gSamLinearWrap, pin.Tex);
     
     pin.WorldNormal = normalize(pin.WorldNormal);
+    
+    // normal map
+    float4 normalMap = gDiffuseMap[normalMapIndex].Sample(gSamAnisotropicWrap, pin.Tex);
+    float3 bumpNormalW = NormalSampleToWorldSpace(normalMap.rgb, pin.WorldNormal, pin.TangentW);
+    
+    //bumpNormalW = pin.WorldNormal;
+    //pin.WorldNormal = normalize(bumpNormalW);
+    
     float3 toEyeW = normalize(gEyePosW - pin.WorldPos);
     
     float4 ambient = gAmbientLight * diffuseAlbedo;
@@ -139,13 +157,13 @@ float4 PSMain(VertexOut pin) : SV_Target
     Material mat = { diffuseAlbedo, fresnelR0, roughness };
     float3 shadowFactor = 1.0f;
     float4 directLight = ComputeLighting(gLights, mat, pin.WorldPos,
-        pin.WorldNormal, toEyeW, shadowFactor);
+        bumpNormalW, toEyeW, shadowFactor);
     
     float4 litColor = ambient + directLight;
     
-    float3 r = reflect(-toEyeW, pin.WorldNormal);
+    float3 r = reflect(-toEyeW, bumpNormalW);
     float4 reflectionColor = gCubeMap.Sample(gSamLinearWrap, r);
-    float3 fresnelFactor = SchlickFresnel(fresnelR0, pin.WorldNormal, r);
+    float3 fresnelFactor = SchlickFresnel(fresnelR0, bumpNormalW, r);
     litColor.rgb += (1-roughness) * fresnelFactor * reflectionColor.rgb;
     
     litColor.a = diffuseAlbedo.a;
@@ -295,4 +313,21 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
 #endif 
 
     return float4(result, 0.0f);
+}
+
+float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW)
+{
+    float3 normalT = 2.0f * normalMapSample - 1.0f;
+
+	// Build orthonormal basis.
+    float3 N = unitNormalW;
+    float3 T = normalize(tangentW - dot(tangentW, N) * N);
+    float3 B = cross(N, T);
+
+    float3x3 TBN = float3x3(T, B, N);
+
+	// Transform from tangent space to world space.
+    float3 bumpedNormalW = mul(normalT, TBN);
+
+    return bumpedNormalW;
 }
