@@ -14,8 +14,12 @@ bool CubeMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 		return false;
 	ThrowIfFailed(cmdList->Reset(cmdAllocator.Get(), nullptr));
 
+<<<<<<< HEAD
 	// set cameras of six cube face 
 	camera.SetPosition(0.0f, 2.0f, -20.0f);
+=======
+	camera.SetPosition(0.0f, 2.0f, -15.0f);
+>>>>>>> 8bdd857849f5f35c3178623872038b93f0284848
 	BuildCubeFaceCamera(0.0, 2.0, 0.0);
 	mDynamicCubeMap = std::make_unique<CubeRenderTarget>(device.Get(), 
 						CubeMapSize, CubeMapSize, DXGI_FORMAT_R8G8B8A8_UNORM);
