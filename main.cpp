@@ -1,6 +1,11 @@
 #include "./src/stdafx.h"
 
-#define CubeMap
+#define SM
+
+#ifdef SM
+#include "./src/ShadowMapApp.h"
+#define APP ShadowMapApp
+#endif // 
 
 #ifdef CubeMap
 #include "./src/CubeMapApp.h"

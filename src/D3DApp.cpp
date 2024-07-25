@@ -437,8 +437,8 @@ void D3DApp::CreateViewPortAndScissorRect()
 	viewPort.TopLeftY = 0;
 	viewPort.Width = width;
 	viewPort.Height = height;
-	viewPort.MaxDepth = 1.0f;
 	viewPort.MinDepth = 0.0f;
+	viewPort.MaxDepth = 1.0f;
 
 	//裁剪矩形设置（矩形外的像素都将被剔除）
 	//前两个为左上点坐标，后两个为右下点坐标

@@ -1,14 +1,17 @@
-#include "CubeMapApp.h"
+#include "ShadowMapApp.h"
 
-CubeMapApp::CubeMapApp()
+ShadowMapApp::ShadowMapApp()
+	: D3DApp()
+{
+	mSceneBounds.Center = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	mSceneBounds.Radius = sqrtf(10.0f * 10.0f + 15.0f * 15.0f);
+}
+
+ShadowMapApp::~ShadowMapApp()
 {
 }
 
-CubeMapApp::~CubeMapApp()
-{
-}
-
-bool CubeMapApp::Init(HINSTANCE hInstance, int nShowCmd)
+bool ShadowMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 {
 	if (!D3DApp::Init(hInstance, nShowCmd))
 		return false;
@@ -16,15 +19,13 @@ bool CubeMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 
 	// set cameras of six cube face 
 	camera.SetPosition(0.0f, 2.0f, -15.0f);
-	BuildCubeFaceCamera(0.0, 2.0, 0.0);
-	mDynamicCubeMap = std::make_unique<CubeRenderTarget>(device.Get(), 
-						CubeMapSize, CubeMapSize, DXGI_FORMAT_R8G8B8A8_UNORM);
+
+	mShadowMap = std::make_unique<ShadowMap>(device.Get(), 2048, 2048);
 
 	loadTexutres();
 
 	BuildRootSignature();
 	BuildDescriptorHeaps();
-	BuildCubeDepthStencil();
 	BuildShadersAndInputLayout();
 	BuildShapeGeometry();
 	BuildSkullGeometry();
@@ -48,7 +49,7 @@ bool CubeMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 	return true;
 }
 
-void CubeMapApp::Draw()
+void ShadowMapApp::Draw()
 {
 	auto currCmdAllocator = mCurrFrameResource->cmdAllocator;
 	ThrowIfFailed(currCmdAllocator->Reset());
@@ -62,15 +63,14 @@ void CubeMapApp::Draw()
 	// material buffer
 	auto matSB = mCurrFrameResource->matBuffer->Resource();
 	cmdList->SetGraphicsRootShaderResourceView(2, matSB->GetGPUVirtualAddress());
-	// cubemap srv
-	CD3DX12_GPU_DESCRIPTOR_HANDLE skyTexDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
-	skyTexDescriptor.Offset(mSkyTexHeapIndex, srvDescriptorSize);
-	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
-	// texture2D srv
-	cmdList->SetGraphicsRootDescriptorTable(4, srvHeap->GetGPUDescriptorHandleForHeapStart());
 
-	// draw cubemap
-	DrawSceneToCubeMap();
+	// Bind null SRV for shadow map pass.
+	cmdList->SetGraphicsRootDescriptorTable(3, mNUllSrv);
+
+	// texture2D srv
+	cmdList->SetGraphicsRootDescriptorTable(5, srvHeap->GetGPUDescriptorHandleForHeapStart());
+
+	DrawSceneToShadowMap();
 
 	cmdList->RSSetViewports(1, &viewPort);
 	cmdList->RSSetScissorRects(1, &scissorRect);
@@ -84,7 +84,10 @@ void CubeMapApp::Draw()
 			D3D12_RESOURCE_STATE_RENDER_TARGET))//从呈现到渲染目标转换
 	);
 
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHeap->GetCPUDescriptorHandleForHeapStart(), ref_mCurrentBackBuffer, rtvDescriptorSize);
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		rtvHeap->GetCPUDescriptorHandleForHeapStart(),
+		ref_mCurrentBackBuffer,
+		rtvDescriptorSize);
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvHeap->GetCPUDescriptorHandleForHeapStart();
 
 	//const float clearColor[] = { 0.2f, 0.2f, 0.4f, 1.0f };
@@ -96,7 +99,8 @@ void CubeMapApp::Draw()
 		0,	//裁剪矩形数量
 		nullptr);	//裁剪矩形指针
 
-	cmdList->OMSetRenderTargets(1,//待绑定的RTV数量
+	cmdList->OMSetRenderTargets(
+		1,//待绑定的RTV数量
 		&rtvHandle,	//指向RTV数组的指针
 		true,	//RTV对象在堆内存中是连续存放的
 		&dsvHandle);	//指向DSV的指针
@@ -104,17 +108,20 @@ void CubeMapApp::Draw()
 	auto passCB = mCurrFrameResource->passCB->Resource();
 	cmdList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
 
-	// dynamic cubemap
-	CD3DX12_GPU_DESCRIPTOR_HANDLE dynamicTexDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
-	dynamicTexDescriptor.Offset(mDynamicTexHeapIndex, srvDescriptorSize);
-	cmdList->SetGraphicsRootDescriptorTable(3, dynamicTexDescriptor);
-	
-	DrawRenderItems(ritemLayer[(int)RenderLayer::OpaqueDynamicReflectors]);
-
 	// static cubemap
+	CD3DX12_GPU_DESCRIPTOR_HANDLE skyTexDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
+	skyTexDescriptor.Offset(mSkyTexHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
 
+	cmdList->SetPipelineState(psos["opaque"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
+
+	CD3DX12_GPU_DESCRIPTOR_HANDLE shadowDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
+	shadowDescriptor.Offset(mShadowMapHeapIndex, srvDescriptorSize);
+	cmdList->SetGraphicsRootDescriptorTable(4, shadowDescriptor);
+	cmdList->SetPipelineState(psos["debug"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Debug]);
+
 	cmdList->SetPipelineState(psos["sky"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::SkyBox]);
 
@@ -139,7 +146,7 @@ void CubeMapApp::Draw()
 	cmdQueue->Signal(fence.Get(), mCurrentFence);
 }
 
-void CubeMapApp::Update()
+void ShadowMapApp::Update()
 {
 	onKeybordInput(gt);
 
@@ -154,40 +161,44 @@ void CubeMapApp::Update()
 		CloseHandle(eventHandle);
 	}
 
-	//XMMATRIX skullScale = XMMatrixScaling(0.2f, 0.2f, 0.2f);
-	//XMMATRIX skullOffset = XMMatrixTranslation(3.0f, 2.0f, 0.0f);
-	//XMMATRIX skullLocalRotate = XMMatrixRotationY(2.0f * gt.TotalTime());
-	//XMMATRIX skullGlobalRotate = XMMatrixRotationY(0.5f * gt.TotalTime());
-	//XMStoreFloat4x4(&mSkullRitem->world, skullScale * skullLocalRotate * skullOffset * skullGlobalRotate);
-	//mSkullRitem->NumFramesDirty = gNumFrameResources;
+	mLightRotationAngle += 0.1f * gt.DeltaTime();
+	XMMATRIX R = XMMatrixRotationY(mLightRotationAngle);
+
+	for (int i = 0; i < 3; i++)
+	{
+		XMVECTOR lightDir = XMLoadFloat3(&mBaseLightDirections[i]);
+		lightDir = XMVector3TransformNormal(lightDir, R);
+		XMStoreFloat3(&mRotatedLightDirections[i], lightDir);
+	}
 
 	UpdateObjectCBs();
 	UpdateMainPassCB();
+	UpdateShadowTransform(gt);
+	UpdateShadowPassCB();
 	UpdateMatCB();
 }
 
-void CubeMapApp::OnResize()
+void ShadowMapApp::OnResize()
 {
 	D3DApp::OnResize();
 	//构建投影矩阵
 
-	camera.SetLen(XM_PIDIV4, static_cast<float>(width) / height, 1.0f, 1000.0f);
-	camera.SetPosition(0, 5, -20);
+	camera.SetLen(XM_PIDIV4, static_cast<float>(width) / static_cast<float>(height) , 1.0f, 1000.0f);
 }
 
-void CubeMapApp::OnMouseDown(WPARAM btnState, int x, int y)
+void ShadowMapApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
 	lastMousePos.x = x;
 	lastMousePos.y = y;
 	SetCapture(mhMainWnd);
 }
 
-void CubeMapApp::OnMouseUp(WPARAM btnState, int x, int y)
+void ShadowMapApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
 	ReleaseCapture();
 }
 
-void CubeMapApp::OnMouseMove(WPARAM btnState, int x, int y)
+void ShadowMapApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	if ((btnState & MK_LBUTTON) != 0)
 	{
@@ -210,11 +221,11 @@ void CubeMapApp::OnMouseMove(WPARAM btnState, int x, int y)
 	lastMousePos.y = y;
 }
 
-void CubeMapApp::CreateDescriptorHeap()
+void ShadowMapApp::CreateDescriptorHeap()
 {
 	// add +6 RTV for cube render target
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-	rtvHeapDesc.NumDescriptors = FrameCount + 6;
+	rtvHeapDesc.NumDescriptors = FrameCount;
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
@@ -223,7 +234,7 @@ void CubeMapApp::CreateDescriptorHeap()
 	));
 
 
-	// add +1 DSV for cube render target
+	// add +1 DSV for shadow map
 	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
 	dsvHeapDesc.NumDescriptors = 2;
 	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
@@ -232,16 +243,9 @@ void CubeMapApp::CreateDescriptorHeap()
 	ThrowIfFailed(device->CreateDescriptorHeap(
 		&dsvHeapDesc, IID_PPV_ARGS(dsvHeap.GetAddressOf())
 	));
-
-	// get handle of cube map dsv 
-	mCubeDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		dsvHeap->GetCPUDescriptorHandleForHeapStart(),
-		1,
-		dsvDescriptorSize
-	);
 }
 
-void CubeMapApp::onKeybordInput(const GameTime& gt)
+void ShadowMapApp::onKeybordInput(const GameTime& gt)
 {
 	const float dt = gt.DeltaTime();
 
@@ -270,7 +274,7 @@ void CubeMapApp::onKeybordInput(const GameTime& gt)
 	sunPhi = MathHelper::Clamp(sunPhi, 0.1f, XM_PIDIV2);
 }
 
-void CubeMapApp::UpdateObjectCBs()
+void ShadowMapApp::UpdateObjectCBs()
 {
 	ObjectConstants objConstants;
 
@@ -295,36 +299,53 @@ void CubeMapApp::UpdateObjectCBs()
 	}
 }
 
-void CubeMapApp::UpdateMainPassCB()
+void ShadowMapApp::UpdateMainPassCB()
 {
-
 	XMMATRIX view = camera.GetView(); // 左手坐标系
 	XMMATRIX proj = camera.GetProj();
 
 	// view存到mView中
 	XMMATRIX vp = view * proj;
 	XMStoreFloat4x4(&passConstants.viewProj, XMMatrixTranspose(vp));
-
+	passConstants.nearZ = 1.0f;
+	passConstants.farZ = 1000.0f;
 	passConstants.eyePosW = camera.GetPosition3f();
 
 	passConstants.ambientLight = { 0.25f,0.25f,0.25f,1.0f };
 
-	passConstants.lights[0].direction = { 0.57735f, -0.57735f, 0.57735f };
-	passConstants.lights[0].strength = { 0.6f, 0.6f, 0.6f };
-	passConstants.lights[1].direction = { -0.57735f, -0.57735f, 0.57735f };
+	passConstants.lights[0].direction = mRotatedLightDirections[0];
+	passConstants.lights[0].strength = { 0.9f, 0.8f, 0.7f };
+	passConstants.lights[1].direction = mRotatedLightDirections[1];
 	passConstants.lights[1].strength = { 0.3f, 0.3f, 0.3f };
-	passConstants.lights[2].direction = { 0.0f, -0.707f, -0.707f };
+	passConstants.lights[2].direction = mRotatedLightDirections[3];
 	passConstants.lights[2].strength = { 0.15f, 0.15f, 0.15f };
 
 	passConstants.totalTime = gt.TotalTime();
 	XMVECTOR sunDir = -MathHelper::SphericalToCartesian(1.0f, sunTheta, sunPhi);
 	XMStoreFloat3(&passConstants.lights[0].direction, sunDir);
 	mCurrFrameResource->passCB->CopyData(0, passConstants);
-
-	UpdateCubeMapFacePassCBs();
 }
 
-void CubeMapApp::UpdateMatCB()
+void ShadowMapApp::UpdateShadowPassCB()
+{
+	XMMATRIX view = XMLoadFloat4x4(&mLightView);
+	XMMATRIX proj = XMLoadFloat4x4(&mLightProj);
+
+	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+
+	//UINT w = mShadowMap->Width();
+	//UINT h = mShadowMap->Height();
+
+	XMStoreFloat4x4(&mShadowConstants.viewProj, XMMatrixTranspose(viewProj));
+	mShadowConstants.eyePosW = mLightPosW;
+	mShadowConstants.nearZ = mLightNearZ;
+	mShadowConstants.farZ = mLightFarZ;
+
+	auto currPassCB = mCurrFrameResource->passCB.get();
+	currPassCB->CopyData(1, mShadowConstants);
+}
+
+void ShadowMapApp::UpdateMatCB()
 {
 	for (auto& m : materials)
 	{
@@ -345,29 +366,51 @@ void CubeMapApp::UpdateMatCB()
 			mCurrFrameResource->matBuffer->CopyData(mat->matCBIndex, matData);
 			mat->numFramesDirty--;
 		}
-
 	}
 }
 
-void CubeMapApp::UpdateCubeMapFacePassCBs()
+void ShadowMapApp::UpdateShadowTransform(GameTime& gt)
 {
-	PassConstants cubeFacePassCB = passConstants;
-	for (int i = 0; i < 6; i++)
-	{
-		XMMATRIX view = mCubeMapCamera[i].GetView();
-		XMMATRIX proj = mCubeMapCamera[i].GetProj();
+	// Only the first "main" light casts a shadow.
+    XMVECTOR lightDir = XMLoadFloat3(&mRotatedLightDirections[0]);
+    XMVECTOR lightPos = -2.0f*mSceneBounds.Radius*lightDir;
+    XMVECTOR targetPos = XMLoadFloat3(&mSceneBounds.Center);
+    XMVECTOR lightUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    XMMATRIX lightView = XMMatrixLookAtLH(lightPos, targetPos, lightUp);
 
-		XMMATRIX viewProj = XMMatrixMultiply(view, proj);
-		XMStoreFloat4x4(&cubeFacePassCB.viewProj, XMMatrixTranspose(viewProj));
+    XMStoreFloat3(&mLightPosW, lightPos);
 
-		cubeFacePassCB.eyePosW = mCubeMapCamera->GetPosition3f();
-		
-		auto currPassCB = mCurrFrameResource->passCB.get();
-		currPassCB->CopyData(1 + i, cubeFacePassCB);
-	}
+    // Transform bounding sphere to light space.
+    XMFLOAT3 sphereCenterLS;
+    XMStoreFloat3(&sphereCenterLS, XMVector3TransformCoord(targetPos, lightView));
+
+    // Ortho frustum in light space encloses scene.
+    float l = sphereCenterLS.x - mSceneBounds.Radius;
+    float b = sphereCenterLS.y - mSceneBounds.Radius;
+    float n = sphereCenterLS.z - mSceneBounds.Radius;
+    float r = sphereCenterLS.x + mSceneBounds.Radius;
+    float t = sphereCenterLS.y + mSceneBounds.Radius;
+    float f = sphereCenterLS.z + mSceneBounds.Radius;
+
+    mLightNearZ = n;
+    mLightFarZ = f;
+    XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(l, r, b, t, n, f);
+
+    // Transform NDC space [-1,+1]^2 to texture space [0,1]^2
+    XMMATRIX T(
+        0.5f, 0.0f, 0.0f, 0.0f,
+        0.0f, -0.5f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.5f, 0.5f, 0.0f, 1.0f);
+
+    XMMATRIX S = lightView*lightProj*T;
+    XMStoreFloat4x4(&mLightView, lightView);
+    XMStoreFloat4x4(&mLightProj, lightProj);
+    XMStoreFloat4x4(&mShadowTransform, S);
+
 }
 
-void CubeMapApp::loadTexutres()
+void ShadowMapApp::loadTexutres()
 {
 
 	auto bricksTex = std::make_unique<Texture>();
@@ -491,7 +534,7 @@ void CubeMapApp::loadTexutres()
 	textures[tile_nmap->name] = std::move(tile_nmap);
 }
 
-ComPtr<ID3D12Resource> CubeMapApp::CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer)
+ComPtr<ID3D12Resource> ShadowMapApp::CreateDefaultBuffer(UINT64 byteSize, const void* initData, ComPtr<ID3D12Resource>& uploadBuffer)
 {
 	// 创建上传堆
 	ThrowIfFailed(device->CreateCommittedResource(
@@ -540,7 +583,7 @@ ComPtr<ID3D12Resource> CubeMapApp::CreateDefaultBuffer(UINT64 byteSize, const vo
 	return defaultBuffer;
 }
 
-std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> CubeMapApp::GetStaticSamplers()
+std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> ShadowMapApp::GetStaticSamplers()
 {
 	const CD3DX12_STATIC_SAMPLER_DESC pointWrap(
 		0, // shaderRegister
@@ -587,19 +630,31 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 6> CubeMapApp::GetStaticSamplers()
 		D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  // addressW
 		0.0f,                              // mipLODBias
 		8);                                // maxAnisotropy
+	const CD3DX12_STATIC_SAMPLER_DESC shadow(
+		6, // shaderRegister
+		D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER,  // addressW
+		0.0f,                               // mipLODBias
+		16,                                 // maxAnisotropy
+		D3D12_COMPARISON_FUNC_LESS_EQUAL,
+		D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
 
 	return {
 		pointWrap, pointClamp,
 		linearWrap, linearClamp,
-		anisotropicWrap, anisotropicClamp };
+		anisotropicWrap, anisotropicClamp,
+		shadow
+	};
 }
 
-void CubeMapApp::BuildDescriptorHeaps()
+void ShadowMapApp::BuildDescriptorHeaps()
 {
 	// move to build buffers/heaps together
 }
 
-void CubeMapApp::BuildConstantBuffers()
+void ShadowMapApp::BuildConstantBuffers()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc;
 	cbvHeapDesc.NumDescriptors = (objCount + 1) * gNumFrameResources; // (objCB + passCB) * frameCounts
@@ -650,11 +705,11 @@ void CubeMapApp::BuildConstantBuffers()
 	}
 }
 
-void CubeMapApp::BuildShaderResourceView()
+void ShadowMapApp::BuildShaderResourceView()
 {
 	// create the SRV heap
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc;
-	srvHeapDesc.NumDescriptors = 10;
+	srvHeapDesc.NumDescriptors = 14;
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	srvHeapDesc.NodeMask = 0;
@@ -662,171 +717,84 @@ void CubeMapApp::BuildShaderResourceView()
 
 	// fill out the heap with actual descriptors
 	auto srvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvHeap->GetCPUDescriptorHandleForHeapStart());
-	auto bricksTex = textures["bricksTex"]->Resource;
-	auto stoneTex = textures["stoneTex"]->Resource;
-	auto tileTex = textures["tileTex"]->Resource;
-	auto whiteTex = textures["whiteTex"]->Resource;
-	auto iceTex = textures["iceTex"]->Resource;
-	auto bricks_nmap = textures["bricks_nmap"]->Resource; // 5
-	auto tile_nmap = textures["tile_nmap"]->Resource; // 6
-	auto default_nmap = textures["default_nmap"]->Resource; //7
+
+	std::vector<ComPtr<ID3D12Resource>> tex2DList =
+	{
+		textures["bricksTex"]->Resource,
+		textures["stoneTex"]->Resource,
+		textures["tileTex"]->Resource,
+		textures["whiteTex"]->Resource,
+		textures["iceTex"]->Resource,
+		textures["bricks_nmap"]->Resource, // 5
+		textures["tile_nmap"]->Resource, // 6
+		textures["default_nmap"]->Resource //7
+	};
+
 	auto skyTex = textures["skyTex"]->Resource;
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = bricksTex->GetDesc().Format;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Texture2D.MostDetailedMip = 0;
 	srvDesc.Texture2D.MipLevels = -1;
 	srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-	device->CreateShaderResourceView(bricksTex.Get(), &srvDesc, srvHandle);
 
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = stoneTex->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = stoneTex->GetDesc().MipLevels;
-	device->CreateShaderResourceView(stoneTex.Get(), &srvDesc, srvHandle);
+	for (UINT i = 0; i < (UINT)tex2DList.size(); i++)
+	{
+		srvDesc.Format = tex2DList[i]->GetDesc().Format;
+		srvDesc.Texture2D.MipLevels = tex2DList[i]->GetDesc().MipLevels;
+		device->CreateShaderResourceView(tex2DList[i].Get(), &srvDesc, srvHandle);
+		srvHandle.Offset(1, srvDescriptorSize);
+	}
 
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = tileTex->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = tileTex->GetDesc().MipLevels;
-	device->CreateShaderResourceView(tileTex.Get(), &srvDesc, srvHandle);
-
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = whiteTex->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = whiteTex->GetDesc().MipLevels;
-	device->CreateShaderResourceView(whiteTex.Get(), &srvDesc, srvHandle);
-
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = iceTex->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = iceTex->GetDesc().MipLevels;
-	device->CreateShaderResourceView(iceTex.Get(), &srvDesc, srvHandle);
-
-	// normal map 5
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = bricks_nmap->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = bricks_nmap->GetDesc().MipLevels;
-	device->CreateShaderResourceView(bricks_nmap.Get(), &srvDesc, srvHandle);
-	//6
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = tile_nmap->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = tile_nmap->GetDesc().MipLevels;
-	device->CreateShaderResourceView(tile_nmap.Get(), &srvDesc, srvHandle);
-	//7
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = default_nmap->GetDesc().Format;
-	srvDesc.Texture2D.MipLevels = default_nmap->GetDesc().MipLevels;
-	device->CreateShaderResourceView(default_nmap.Get(), &srvDesc, srvHandle);
-
-	srvHandle.Offset(1, srvDescriptorSize);
-	srvDesc.Format = skyTex->GetDesc().Format;
+	// sky Cube map
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+	srvDesc.Format = skyTex->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = skyTex->GetDesc().MipLevels;
 	device->CreateShaderResourceView(skyTex.Get(), &srvDesc, srvHandle);
 
-	mSkyTexHeapIndex = 8;
-	mDynamicTexHeapIndex = mSkyTexHeapIndex + 1;
+	mSkyTexHeapIndex = (UINT)tex2DList.size();//7
+	mShadowMapHeapIndex = mSkyTexHeapIndex + 1;//8
+
+	mNullCubeSrvIndex = mShadowMapHeapIndex + 1;//9
+	mNullTexSrvIndex = mNullCubeSrvIndex + 1;
 
 	auto srvCpuStart = srvHeap->GetCPUDescriptorHandleForHeapStart();
 	auto srvGpuStart = srvHeap->GetGPUDescriptorHandleForHeapStart();
-	auto rtvCpuStart = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+	auto dsvCpuStart = dsvHeap->GetCPUDescriptorHandleForHeapStart();
 
-	// cubemap RTV goes after the swap chain desciptors
-	int rtvOffset = FrameCount;
+	auto nullSrv = CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mNullCubeSrvIndex, srvDescriptorSize);
+	mNUllSrv = CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mNullCubeSrvIndex, srvDescriptorSize);
+	
+	device->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
+	nullSrv.Offset(1, srvDescriptorSize);
 
-	CD3DX12_CPU_DESCRIPTOR_HANDLE cubeRtvHandles[6];
-	for (int i = 0; i < 6; ++i)
-		cubeRtvHandles[i] = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvCpuStart, rtvOffset + i, rtvDescriptorSize);
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	srvDesc.Texture2D.MostDetailedMip = 0;
+	srvDesc.Texture1D.MipLevels = 1;
+	srvDesc.Texture1D.ResourceMinLODClamp = 0.0f;
+	device->CreateShaderResourceView(nullptr, &srvDesc, nullSrv);
 
-	// dynamic cubemap srv is after the sky SRV
-	mDynamicCubeMap->BuildDescriptors(
-		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mDynamicTexHeapIndex, srvDescriptorSize),
-		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mDynamicTexHeapIndex, srvDescriptorSize),
-		cubeRtvHandles);
-}
-
-void CubeMapApp::BuildCubeDepthStencil()
-{
-	D3D12_RESOURCE_DESC depthStencilDesc;
-	depthStencilDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-	depthStencilDesc.Alignment = 0;
-	depthStencilDesc.Width = CubeMapSize;
-	depthStencilDesc.Height = CubeMapSize;
-	depthStencilDesc.DepthOrArraySize = 1;
-	depthStencilDesc.MipLevels = 1;
-	depthStencilDesc.Format = mDepthStencilFormat;
-	depthStencilDesc.SampleDesc.Count = 1;
-	depthStencilDesc.SampleDesc.Quality = 0;
-	depthStencilDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-	depthStencilDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-	D3D12_CLEAR_VALUE optClear;
-	optClear.Format = mDepthStencilFormat;
-	optClear.DepthStencil.Depth = 1.0f;
-	optClear.DepthStencil.Stencil = 0;
-	ThrowIfFailed(device->CreateCommittedResource(
-		get_rvalue_ptr(D3D12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT)),
-		D3D12_HEAP_FLAG_NONE,
-		&depthStencilDesc,
-		D3D12_RESOURCE_STATE_COMMON,
-		&optClear,
-		IID_PPV_ARGS(mCubeDepthStencilBuffer.GetAddressOf()))
+	mShadowMap->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mShadowMapHeapIndex, srvDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mShadowMapHeapIndex, srvDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvCpuStart, 1, dsvDescriptorSize)
 	);
-
-	device->CreateDepthStencilView(mCubeDepthStencilBuffer.Get(), nullptr, mCubeDSV);
-
-	cmdList->ResourceBarrier(
-		1,
-		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
-			mCubeDepthStencilBuffer.Get(),
-			D3D12_RESOURCE_STATE_COMMON,
-			D3D12_RESOURCE_STATE_DEPTH_WRITE
-		)));
 }
 
-void CubeMapApp::BuildCubeFaceCamera(float x, float y, float z)
-{
-	// generate the cube map about the given position
-	XMFLOAT3 center(x, y, z);
-	XMFLOAT3 worldUp(0.0, 1.0, 0.0);
 
-	// look along each coordinate axis
-	XMFLOAT3 targets[6] =
-	{
-		XMFLOAT3(x + 1.0, y, z), // +X
-		XMFLOAT3(x - 1.0, y, z), // -X
-		XMFLOAT3(x, y + 1.0, z), // +Y
-		XMFLOAT3(x, y - 1.0, z), // -Y
-		XMFLOAT3(x, y, z + 1.0), // +Z
-		XMFLOAT3(x, y, z - 1.0), // -Z
-	};
-
-	// use world up vector for alldirections except +Y/-Y
-	XMFLOAT3 ups[6] =
-	{
-		XMFLOAT3(0.0, 1.0, 0.0), // +X
-		XMFLOAT3(0.0, 1.0, 0.0), // -X
-		XMFLOAT3(0.0, 0.0, -1.0), // +Y
-		XMFLOAT3(0.0, 0.0, +1.0), // -Y
-		XMFLOAT3(0.0, 1.0, 0.0), // +Z
-		XMFLOAT3(0.0, 1.0, 0.0), // -Z
-	};
-
-	for (int i = 0; i < 6; i++)
-	{
-		mCubeMapCamera[i].LookAt(center, targets[i], ups[i]);
-		mCubeMapCamera[i].SetLen(0.5 * XM_PI, 1.0, 0.1, 1000.0); // fov = 90
-		mCubeMapCamera[i].UpdateViewMatrix();
-	}
-}
-
-void CubeMapApp::BuildRootSignature()
+void ShadowMapApp::BuildRootSignature()
 {
 	// 每个根参数只能绑定一个寄存器空间中的特定类型资源
-	CD3DX12_ROOT_PARAMETER slotRootParameter[5];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[6];
 
 	CD3DX12_DESCRIPTOR_RANGE srvTable0;
 	srvTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
 	CD3DX12_DESCRIPTOR_RANGE srvTable1;
-	srvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 8, 1, 0);
+	srvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0);
+	CD3DX12_DESCRIPTOR_RANGE srvTable2;
+	srvTable2.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 2, 0);
 
 	slotRootParameter[0].InitAsConstantBufferView(0);
 	slotRootParameter[1].InitAsConstantBufferView(1);
@@ -834,10 +802,11 @@ void CubeMapApp::BuildRootSignature()
 	slotRootParameter[2].InitAsShaderResourceView(0, 1);
 	slotRootParameter[3].InitAsDescriptorTable(1, &srvTable0);
 	slotRootParameter[4].InitAsDescriptorTable(1, &srvTable1);
+	slotRootParameter[5].InitAsDescriptorTable(1, &srvTable2);
 
 	auto staticSamplers = GetStaticSamplers();
 
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(5,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6,
 		slotRootParameter,
 		(UINT)staticSamplers.size(),
 		staticSamplers.data(),
@@ -860,7 +829,7 @@ void CubeMapApp::BuildRootSignature()
 	));
 }
 
-void CubeMapApp::BuildShadersAndInputLayout()
+void ShadowMapApp::BuildShadersAndInputLayout()
 {
 	inputLayoutDesc =
 	{
@@ -876,9 +845,14 @@ void CubeMapApp::BuildShadersAndInputLayout()
 	shaders["skyVS"] = CompileShader(std::wstring(L"shader/skybox.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
 	shaders["skyPS"] = CompileShader(std::wstring(L"shader/skybox.hlsl").c_str(), nullptr, "PSMain", "ps_5_1");
 
+	shaders["shadowVS"] = CompileShader(std::wstring(L"shader/shadowmap.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
+	shaders["shadowPS"] = CompileShader(std::wstring(L"shader/shadowmap.hlsl").c_str(), nullptr, "PSMain", "ps_5_1");
+
+	shaders["debugVS"] = CompileShader(std::wstring(L"shader/shadowDebug.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
+	shaders["debugPS"] = CompileShader(std::wstring(L"shader/shadowDebug.hlsl").c_str(), nullptr, "PSMain", "ps_5_1");
 }
 
-void CubeMapApp::BuildShapeGeometry()
+void ShadowMapApp::BuildShapeGeometry()
 {
 	GeometryGenerator geoGen;
 	GeometryGenerator::MeshData box = geoGen.CreateBox(1.5f, 0.5f, 1.5f, 3);
@@ -887,6 +861,7 @@ void CubeMapApp::BuildShapeGeometry()
 	//GeometryGenerator::MeshData sphere = geoGen.CreateGeosphere(0.5f, 3);
 	GeometryGenerator::MeshData cylinder = geoGen.CreateCylinder(0.5f, 0.3f, 3.0f, 20, 20);
 	GeometryGenerator::MeshData gsSpehre = geoGen.CreateGeoSphere20Face(0.8f);
+	GeometryGenerator::MeshData quad = geoGen.CreateQuad(0.0f, 0.0f, 1.0f, 1.0f, 0.0f);
 
 	// concatenate all the geometry into one big vertex/index buffer
 	// **********************
@@ -897,6 +872,7 @@ void CubeMapApp::BuildShapeGeometry()
 	UINT sphereVertexOffset = gridVertexOffset + (UINT)grid.Vertices.size();
 	UINT cylinderVertexOffset = sphereVertexOffset + (UINT)sphere.Vertices.size();
 	UINT gsSpehreVertexOffset = cylinderVertexOffset + (UINT)cylinder.Vertices.size();
+	UINT quadVertexOffset = gsSpehreVertexOffset + (UINT)gsSpehre.Vertices.size();
 
 	// the index offset to each object
 	UINT boxIndexOffset = 0;
@@ -904,6 +880,7 @@ void CubeMapApp::BuildShapeGeometry()
 	UINT sphereIndexOffset = gridIndexOffset + (UINT)grid.Indices32.size();
 	UINT cylinderIndexOffset = sphereIndexOffset + (UINT)sphere.Indices32.size();
 	UINT gsSpehreIndexOffset = cylinderIndexOffset + (UINT)cylinder.Indices32.size();
+	UINT quadIndexOffset = gsSpehreIndexOffset + (UINT)gsSpehre.Indices32.size();
 
 	//
 	SubmeshGeometry boxSubmesh;
@@ -931,12 +908,18 @@ void CubeMapApp::BuildShapeGeometry()
 	gsSpehreSubmesh.StartIndexLocation = gsSpehreIndexOffset;
 	gsSpehreSubmesh.BaseVertexLocation = gsSpehreVertexOffset;
 
+	SubmeshGeometry quadSubmesh;
+	quadSubmesh.IndexCount = (UINT)quad.Indices32.size();
+	quadSubmesh.StartIndexLocation = quadIndexOffset;
+	quadSubmesh.BaseVertexLocation = quadVertexOffset;
+
 	auto totalVertexCount =
 		box.Vertices.size() +
 		grid.Vertices.size() +
 		sphere.Vertices.size() +
 		cylinder.Vertices.size() +
-		gsSpehre.Vertices.size();
+		gsSpehre.Vertices.size() +
+		quad.Vertices.size();
 
 	std::vector<Vertex> vertices(totalVertexCount);
 
@@ -977,6 +960,13 @@ void CubeMapApp::BuildShapeGeometry()
 		vertices[k].Tex = gsSpehre.Vertices[i].TexC;
 		vertices[k].TangentU = gsSpehre.Vertices[i].TangentU;
 	}
+	for (size_t i = 0; i < quad.Vertices.size(); ++i, ++k)
+	{
+		vertices[k].Pos = quad.Vertices[i].Position;
+		vertices[k].Normal = quad.Vertices[i].Normal;
+		vertices[k].Tex = quad.Vertices[i].TexC;
+		vertices[k].TangentU = quad.Vertices[i].TangentU;
+	}
 
 	std::vector<std::uint16_t> indices;
 	indices.insert(indices.end(), std::begin(box.GetIndices16()), std::end(box.GetIndices16()));
@@ -984,6 +974,7 @@ void CubeMapApp::BuildShapeGeometry()
 	indices.insert(indices.end(), std::begin(sphere.GetIndices16()), std::end(sphere.GetIndices16()));
 	indices.insert(indices.end(), std::begin(cylinder.GetIndices16()), std::end(cylinder.GetIndices16()));
 	indices.insert(indices.end(), std::begin(gsSpehre.GetIndices16()), std::end(gsSpehre.GetIndices16()));
+	indices.insert(indices.end(), std::begin(quad.GetIndices16()), std::end(quad.GetIndices16()));
 
 	const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
 	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
@@ -1003,11 +994,12 @@ void CubeMapApp::BuildShapeGeometry()
 	geo->DrawArgs["sphere"] = sphereSubmesh;
 	geo->DrawArgs["cylinder"] = cylinderSubmesh;
 	geo->DrawArgs["gsSpehre"] = gsSpehreSubmesh;
+	geo->DrawArgs["quad"] = quadSubmesh;
 
 	geometries["shapeGeo"] = std::move(geo);
 }
 
-void CubeMapApp::BuildSkySphereGeometry()
+void ShadowMapApp::BuildSkySphereGeometry()
 {
 	GeometryGenerator geoGen;
 	GeometryGenerator::MeshData skySphere = geoGen.CreateSphere(1.0, 20, 20);
@@ -1030,7 +1022,7 @@ void CubeMapApp::BuildSkySphereGeometry()
 
 	auto geo = std::make_unique<MeshGeometry>();
 	geo->name = "skySphereGeo";
-	
+
 	geo->vertexBufferByteSize = vbByteSize;
 	geo->indexBufferByteSize = ibByteSize;
 	geo->vertexByteStride = sizeof(Vertex);
@@ -1055,7 +1047,7 @@ void CubeMapApp::BuildSkySphereGeometry()
 }
 
 
-void CubeMapApp::BuildMaterials()
+void ShadowMapApp::BuildMaterials()
 {
 	auto grid = std::make_unique<Material>();
 	grid->name = "grid";
@@ -1131,7 +1123,7 @@ void CubeMapApp::BuildMaterials()
 	matCount = materials.size();
 }
 
-void CubeMapApp::BuildSkullGeometry()
+void ShadowMapApp::BuildSkullGeometry()
 {
 
 	std::ifstream fin("./model/skull.txt");
@@ -1193,7 +1185,7 @@ void CubeMapApp::BuildSkullGeometry()
 	geometries["skullGeo"] = std::move(geo);
 }
 
-void CubeMapApp::BuildPSO()
+void ShadowMapApp::BuildPSO()
 {
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 	psoDesc.InputLayout = { inputLayoutDesc.data(), (unsigned int)inputLayoutDesc.size() };
@@ -1218,10 +1210,44 @@ void CubeMapApp::BuildPSO()
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	psoDesc.SampleDesc.Count = 1;
 	psoDesc.SampleDesc.Quality = 0;
-	psoDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	psoDesc.DSVFormat = mDepthStencilFormat;
 	psos["opaque"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psos["opaque"])));
 
+	
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowMapPsoDesc = psoDesc;
+	shadowMapPsoDesc.RasterizerState.DepthBias = 100000;
+	shadowMapPsoDesc.RasterizerState.DepthBiasClamp = 0.0f;
+	shadowMapPsoDesc.RasterizerState.SlopeScaledDepthBias = 1.0f;
+	shadowMapPsoDesc.pRootSignature = rootSignature.Get();
+	shadowMapPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["shadowVS"]->GetBufferPointer()),
+		shaders["shadowVS"]->GetBufferSize()
+	};
+	shadowMapPsoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["shadowPS"]->GetBufferPointer()),
+		shaders["shadowPS"]->GetBufferSize()
+	};
+	shadowMapPsoDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+	shadowMapPsoDesc.NumRenderTargets = 0;
+	psos["shadowOpaque"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&shadowMapPsoDesc, IID_PPV_ARGS(&psos["shadowOpaque"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC debugPsoDesc = psoDesc;
+	debugPsoDesc.pRootSignature = rootSignature.Get();
+	debugPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["debugVS"]->GetBufferPointer()),
+		shaders["debugVS"]->GetBufferSize()
+	};
+	debugPsoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["debugPS"]->GetBufferPointer()),
+		shaders["debugPS"]->GetBufferSize()
+	};
+	psos["debug"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&debugPsoDesc, IID_PPV_ARGS(&psos["debug"])));
+
+	// sky pso
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC skyPsoDesc = psoDesc;
 	skyPsoDesc.VS = {
 		reinterpret_cast<BYTE*>(shaders["skyVS"]->GetBufferPointer()),
@@ -1237,7 +1263,7 @@ void CubeMapApp::BuildPSO()
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&psos["sky"])));
 }
 
-void CubeMapApp::BuildRenderItem()
+void ShadowMapApp::BuildRenderItem()
 {
 	auto boxRitem = std::make_unique<RenderItem>();
 	XMStoreFloat4x4(&boxRitem->world, XMMatrixScaling(2.0f, 2.0f, 2.0f) * XMMatrixTranslation(0.0f, 0.5f, 0.0f));
@@ -1280,36 +1306,36 @@ void CubeMapApp::BuildRenderItem()
 	ritemLayer[(int)RenderLayer::OpaqueDynamicReflectors].push_back(ballRitem.get());
 	allRitems.push_back(std::move(ballRitem));
 
-	//auto skullRitem = std::make_unique<RenderItem>();
-	//XMStoreFloat4x4(&skullRitem->world, XMMatrixScaling(0.5f, 0.5f, 0.5f) * XMMatrixTranslation(0.0f, 1.0f, 0.0f));
-	//skullRitem->NumFramesDirty = gNumFrameResources;
-	//skullRitem->objCBIndex = 3;//skull常量数据（world矩阵）在objConstantBuffer索引1上
-	//skullRitem->mat = materials["skull"].get();
-	//skullRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	//skullRitem->geo = geometries["skullGeo"].get();
-	//skullRitem->indexCount = skullRitem->geo->DrawArgs["skull"].IndexCount;
-	//skullRitem->baseVertexLocation = skullRitem->geo->DrawArgs["skull"].BaseVertexLocation;
-	//skullRitem->startIndexLocation = skullRitem->geo->DrawArgs["skull"].StartIndexLocation;
-	//ritemLayer[(int)RenderLayer::Opaque].push_back(skullRitem.get());
-	//mSkullRitem = skullRitem.get();
-	//allRitems.push_back(std::move(skullRitem));
-
 	auto skyBoxRitem = std::make_unique<RenderItem>();
 	skyBoxRitem->world = MathHelper::Identity4x4();
 	skyBoxRitem->texTransform = MathHelper::Identity4x4();
 	skyBoxRitem->NumFramesDirty = gNumFrameResources;
-	skyBoxRitem->objCBIndex = 3;//skull常量数据（world矩阵）在objConstantBuffer索引1上
+	skyBoxRitem->objCBIndex = 3;
 	skyBoxRitem->mat = materials["sky"].get();
 	skyBoxRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-	skyBoxRitem->geo = geometries["skySphereGeo"].get(); 
+	skyBoxRitem->geo = geometries["skySphereGeo"].get();
 	skyBoxRitem->indexCount = skyBoxRitem->geo->DrawArgs["skySphere"].IndexCount;
 	skyBoxRitem->baseVertexLocation = skyBoxRitem->geo->DrawArgs["skySphere"].BaseVertexLocation;
 	skyBoxRitem->startIndexLocation = skyBoxRitem->geo->DrawArgs["skySphere"].StartIndexLocation;
-	
+
 	ritemLayer[(int)RenderLayer::SkyBox].push_back(skyBoxRitem.get());
 	allRitems.push_back(std::move(skyBoxRitem));
 
-	UINT objCBIndex = 4;
+	auto quadRitem = std::make_unique<RenderItem>();
+	quadRitem->world = MathHelper::Identity4x4();
+	quadRitem->texTransform = MathHelper::Identity4x4();
+	quadRitem->NumFramesDirty = gNumFrameResources;
+	quadRitem->objCBIndex = 4;
+	quadRitem->mat = materials["grid"].get();
+	quadRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	quadRitem->geo = geometries["shapeGeo"].get();
+	quadRitem->indexCount = quadRitem->geo->DrawArgs["quad"].IndexCount;
+	quadRitem->baseVertexLocation = quadRitem->geo->DrawArgs["quad"].BaseVertexLocation;
+	quadRitem->startIndexLocation = quadRitem->geo->DrawArgs["quad"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::Debug].push_back(quadRitem.get());
+	allRitems.push_back(std::move(quadRitem));
+
+	UINT objCBIndex = 5;
 	for (int i = 0; i < 5; i++) {
 		auto leftCylRitem = std::make_unique<RenderItem>();
 		auto rightCylRitem = std::make_unique<RenderItem>();
@@ -1378,7 +1404,7 @@ void CubeMapApp::BuildRenderItem()
 	objCount = allRitems.size();
 }
 
-void CubeMapApp::DrawRenderItems(std::vector<RenderItem*> ritems)
+void ShadowMapApp::DrawRenderItems(std::vector<RenderItem*> ritems)
 {
 	auto objCBByteSize = CalcConstantBufferByteSize<ObjectConstants>();
 	auto objCB = mCurrFrameResource->objCB->Resource();
@@ -1405,7 +1431,7 @@ void CubeMapApp::DrawRenderItems(std::vector<RenderItem*> ritems)
 	}
 }
 
-void CubeMapApp::BuildFrameResources()
+void ShadowMapApp::BuildFrameResources()
 {
 
 	for (int i = 0; i < gNumFrameResources; i++)
@@ -1420,58 +1446,50 @@ void CubeMapApp::BuildFrameResources()
 	}
 }
 
-void CubeMapApp::DrawSceneToCubeMap()
+void ShadowMapApp::DrawSceneToShadowMap()
 {
-	cmdList->RSSetViewports(1, get_rvalue_ptr(mDynamicCubeMap->Viewport()));
-	cmdList->RSSetScissorRects(1, get_rvalue_ptr(mDynamicCubeMap->ScissorRect()));
+	cmdList->RSSetViewports(1, get_rvalue_ptr(mShadowMap->Viewport()));
+	cmdList->RSSetScissorRects(1, get_rvalue_ptr(mShadowMap->ScissorRect()));
 
+	// change to depth write
 	cmdList->ResourceBarrier(
 		1,
-		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
-			mDynamicCubeMap->Resource(),
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			D3D12_RESOURCE_STATE_RENDER_TARGET))
+		get_rvalue_ptr(
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				mShadowMap->Resource(),
+				D3D12_RESOURCE_STATE_GENERIC_READ,
+				D3D12_RESOURCE_STATE_DEPTH_WRITE
+			))
 	);
 
-	UINT passCBByteSize = CalcConstantBufferByteSize<PassConstants>();
+	auto passCBByteSize = CalcConstantBufferByteSize<PassConstants>();
 
-	// for each cube map face
-	for (int i = 0; i < 6; i++)
-	{
-		cmdList->ClearRenderTargetView(mDynamicCubeMap->Rtv(i), DirectX::Colors::LightSteelBlue, 0, nullptr);
-		cmdList->ClearDepthStencilView(mCubeDSV, 
-			D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-			1.0,
-			0,
-			0,
-			nullptr);
+	cmdList->ClearDepthStencilView(
+		mShadowMap->Dsv(),
+		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+		1.0f,
+		0,
+		0,
+		nullptr
+	);
 
-		// specify the buffers we are going to render
-		cmdList->OMSetRenderTargets(
-			1,
-			get_rvalue_ptr(mDynamicCubeMap->Rtv(i)),
-			true,
-			&mCubeDSV
-		);
+	cmdList->OMSetRenderTargets(0, nullptr, false, get_rvalue_ptr(mShadowMap->Dsv()));
 
-		// Bind the pass constant buffer for this cube map facve so we use
-		auto passCB = mCurrFrameResource->passCB->Resource();
-		D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + (1 + i) * passCBByteSize;
-		cmdList->SetGraphicsRootConstantBufferView(1, passCBAddress);
+	auto passCB = mCurrFrameResource->passCB->Resource();
+	D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + 1 * passCBByteSize;
+	cmdList->SetGraphicsRootConstantBufferView(1, passCBAddress);
 
-		DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
-		cmdList->SetPipelineState(psos["sky"].Get());
-		DrawRenderItems(ritemLayer[(int)RenderLayer::SkyBox]);
+	cmdList->SetPipelineState(psos["shadowOpaque"].Get());
 
-		cmdList->SetPipelineState(psos["opaque"].Get());
-	}
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
 
 	cmdList->ResourceBarrier(
 		1,
-		get_rvalue_ptr(CD3DX12_RESOURCE_BARRIER::Transition(
-			mDynamicCubeMap->Resource(),
-			D3D12_RESOURCE_STATE_RENDER_TARGET,
-			D3D12_RESOURCE_STATE_GENERIC_READ))
+		get_rvalue_ptr(
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				mShadowMap->Resource(),
+				D3D12_RESOURCE_STATE_DEPTH_WRITE,
+				D3D12_RESOURCE_STATE_GENERIC_READ
+			))
 	);
 }
-

@@ -131,6 +131,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\ShadowMapApp.cpp" />
     <ClCompile Include="src\CubeRenderTarget.cpp" />
     <ClCompile Include="src\CubeMapApp.cpp" />
     <ClCompile Include="src\InstancingAndCullingApp.cpp" />
@@ -146,10 +147,12 @@
     <ClCompile Include="src\D3D12InitApp.cpp" />
     <ClCompile Include="src\GameTime.cpp" />
     <ClCompile Include="src\D3DApp.cpp" />
+    <ClCompile Include="src\ShadowMap.cpp" />
     <ClCompile Include="src\Wave.cpp" />
     <ClCompile Include="src\StencilApp.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\ShadowMapApp.h" />
     <ClInclude Include="src\CubeRenderTarget.h" />
     <ClInclude Include="src\CubeMapApp.h" />
     <ClInclude Include="src\InstancingAndCullingApp.h" />
@@ -167,6 +170,7 @@
     <ClInclude Include="src\d3dUtil.h" />
     <ClInclude Include="src\d3dx12.h" />
     <ClInclude Include="src\MathHelper.h" />
+    <ClInclude Include="src\ShadowMap.h" />
     <ClInclude Include="src\stdafx.h" />
     <ClInclude Include="src\UploadBuffer.h" />
     <ClInclude Include="src\Wave.h" />
@@ -282,6 +286,32 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\skybox.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4.0</ShaderModel>
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shader\shadowmap.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">4.0</ShaderModel>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4.0</ShaderModel>
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shader\shadowDebug.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">4.0</ShaderModel>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>

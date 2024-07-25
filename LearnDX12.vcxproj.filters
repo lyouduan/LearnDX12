@@ -66,6 +66,12 @@
     <ClCompile Include="src\CubeRenderTarget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ShadowMap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ShadowMapApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\d3dx12.h">
@@ -131,6 +137,12 @@
     <ClInclude Include="src\CubeRenderTarget.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\ShadowMap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ShadowMapApp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl" />
@@ -143,6 +155,8 @@
     <None Include="shader\Tessellation.hlsl" />
     <None Include="shader\instance.hlsl" />
     <None Include="shader\skybox.hlsl" />
+    <None Include="shader\shadowmap.hlsl" />
+    <None Include="shader\shadowDebug.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />

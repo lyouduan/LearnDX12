@@ -61,13 +61,21 @@ struct PassConstants
 	XMFLOAT4X4 viewProj = MathHelper::Identity4x4();
 	XMFLOAT3 eyePosW = { 0.0, 0.0, 0.0 };
 	float totalTime = 0.0;
-	XMFLOAT4 ambientLight = { 0.0, 0.0, 0.0, 1.0};
+
+	
+	XMFLOAT4 ambientLight = { 0.0, 0.0, 0.0, 1.0 };
+
 	Light lights[MAX_LIGHTS];
 
 	XMFLOAT4 fogColor = { 0.7f, 0.7f, 0.7f, 1.0f };
 	float fogStart = 5.0;
 	float fogRange = 150.0;
 	XMFLOAT2 pad2 = { 0.0, 0.0 }; // padding
+
+	XMFLOAT2 renderTargetSize = { 0.0f, 0.0f };
+	float nearZ = 0.0f;
+	float farZ = 0.0f;
+	XMFLOAT4X4 shadowTransform = MathHelper::Identity4x4();
 };
 
 struct MatConstants
