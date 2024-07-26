@@ -63,6 +63,7 @@ cbuffer cbPerObject : register(b1)
     float3 gEyePosW;
     float gTotalTime;
     float4 gAmbientLight;
+    float4x4 gShadowTransform;
     Light gLights[MaxLights];
 }
 TextureCube gCubeMap : register(t0); //ËùÓĞÂş·´ÉäÌùÍ¼

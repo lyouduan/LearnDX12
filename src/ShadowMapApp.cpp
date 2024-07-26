@@ -113,12 +113,14 @@ void ShadowMapApp::Draw()
 	skyTexDescriptor.Offset(mSkyTexHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
 
-	cmdList->SetPipelineState(psos["opaque"].Get());
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
-
 	CD3DX12_GPU_DESCRIPTOR_HANDLE shadowDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
 	shadowDescriptor.Offset(mShadowMapHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(4, shadowDescriptor);
+
+	cmdList->SetPipelineState(psos["opaque"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
+
+	
 	cmdList->SetPipelineState(psos["debug"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Debug]);
 
@@ -317,12 +319,16 @@ void ShadowMapApp::UpdateMainPassCB()
 	passConstants.lights[0].strength = { 0.9f, 0.8f, 0.7f };
 	passConstants.lights[1].direction = mRotatedLightDirections[1];
 	passConstants.lights[1].strength = { 0.3f, 0.3f, 0.3f };
-	passConstants.lights[2].direction = mRotatedLightDirections[3];
+	passConstants.lights[2].direction = mRotatedLightDirections[2];
 	passConstants.lights[2].strength = { 0.15f, 0.15f, 0.15f };
 
 	passConstants.totalTime = gt.TotalTime();
 	XMVECTOR sunDir = -MathHelper::SphericalToCartesian(1.0f, sunTheta, sunPhi);
 	XMStoreFloat3(&passConstants.lights[0].direction, sunDir);
+
+	XMMATRIX shadowTransform = XMLoadFloat4x4(&mShadowTransform);
+	XMStoreFloat4x4(&passConstants.shadowTransform, XMMatrixTranspose(shadowTransform));
+
 	mCurrFrameResource->passCB->CopyData(0, passConstants);
 }
 
@@ -403,11 +409,10 @@ void ShadowMapApp::UpdateShadowTransform(GameTime& gt)
         0.0f, 0.0f, 1.0f, 0.0f,
         0.5f, 0.5f, 0.0f, 1.0f);
 
-    XMMATRIX S = lightView*lightProj*T;
+    XMMATRIX S = lightView * lightProj * T;
     XMStoreFloat4x4(&mLightView, lightView);
     XMStoreFloat4x4(&mLightProj, lightProj);
     XMStoreFloat4x4(&mShadowTransform, S);
-
 }
 
 void ShadowMapApp::loadTexutres()
@@ -861,7 +866,8 @@ void ShadowMapApp::BuildShapeGeometry()
 	//GeometryGenerator::MeshData sphere = geoGen.CreateGeosphere(0.5f, 3);
 	GeometryGenerator::MeshData cylinder = geoGen.CreateCylinder(0.5f, 0.3f, 3.0f, 20, 20);
 	GeometryGenerator::MeshData gsSpehre = geoGen.CreateGeoSphere20Face(0.8f);
-	GeometryGenerator::MeshData quad = geoGen.CreateQuad(0.0f, 0.0f, 1.0f, 1.0f, 0.0f);
+	
+	GeometryGenerator::MeshData quad = geoGen.CreateQuad(0.5f, -0.5f, 0.5f, 0.5f, 0.0f);
 
 	// concatenate all the geometry into one big vertex/index buffer
 	// **********************
@@ -1213,8 +1219,6 @@ void ShadowMapApp::BuildPSO()
 	psoDesc.DSVFormat = mDepthStencilFormat;
 	psos["opaque"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&psos["opaque"])));
-
-	
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowMapPsoDesc = psoDesc;
 	shadowMapPsoDesc.RasterizerState.DepthBias = 100000;

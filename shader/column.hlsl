@@ -1,7 +1,7 @@
 #define MaxLights 16
 
 #ifndef NUM_DIR_LIGHTS
-#define NUM_DIR_LIGHTS 1
+#define NUM_DIR_LIGHTS 3
 #endif
 
 #ifndef NUM_POINT_LIGHTS
@@ -50,12 +50,6 @@ cbuffer cbPerObject : register(b0)
     uint gObjPad2;
 
 }
-//cbuffer cbMatObject : register(b1)
-//{
-//    float4 gDiffuseAlbedo;
-//    float3 gFresnelR0;
-//    float gRoughness;
-//}
 
 cbuffer cbPerObject : register(b1)
 {
@@ -63,6 +57,7 @@ cbuffer cbPerObject : register(b1)
     float3 gEyePosW;
     float gTotalTime;
     float4 gAmbientLight;
+    float4x4 gShadowTransform;
     Light gLights[MaxLights];
 }
 TextureCube gCubeMap : register(t0); //ËùÓÐÂþ·´ÉäÌùÍ¼
@@ -79,6 +74,7 @@ SamplerState gSamLinearWrap : register(s2);
 SamplerState gSamLinearClamp : register(s3);
 SamplerState gSamAnisotropicWrap : register(s4);
 SamplerState gSamAnisotropicClamp : register(s5);
+SamplerComparisonState gSamShadow : register(s6);
 
 float CalcAttenuation(float d, float falloffStart, float falloffEnd);
 float3 SchlickFresnel(float3 R0, float3 normal, float3 lightVec);
@@ -91,6 +87,7 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
                        float3 shadowFactor);
 
 float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW);
+float CalcShadowFactor(float4 shadowPosH);
 
 struct VertexIn
 {
@@ -103,7 +100,8 @@ struct VertexIn
 struct VertexOut
 {
     float4 PosH : SV_POSITION;
-    float3 WorldPos : POSITION;
+    float4 ShadowPosH : POSITION0;
+    float3 WorldPos : POSITION1;
     float3 WorldNormal : NORMAL;
     float2 Tex : TEXCOORD;
     float3 TangentW : TANGENT;
@@ -127,6 +125,7 @@ VertexOut VSMain(VertexIn vin)
     
     vout.TangentW = mul(vin.Tangent, (float3x3) world);
     
+    vout.ShadowPosH = mul(PosW, gShadowTransform);
     return vout;
 }
 
@@ -156,7 +155,10 @@ float4 PSMain(VertexOut pin) : SV_Target
     float4 ambient = gAmbientLight * diffuseAlbedo;
     
     Material mat = { diffuseAlbedo, fresnelR0, roughness };
-    float3 shadowFactor = 1.0f;
+    
+    float3 shadowFactor = float3(1.0f, 1.0f, 1.0f);
+    shadowFactor[0] = CalcShadowFactor(pin.ShadowPosH);
+    
     float4 directLight = ComputeLighting(gLights, mat, pin.WorldPos,
         bumpNormalW, toEyeW, shadowFactor);
     
@@ -170,6 +172,48 @@ float4 PSMain(VertexOut pin) : SV_Target
     litColor.a = diffuseAlbedo.a;
     
     return litColor;
+}
+
+float CalcShadowFactor(float4 shadowPosH)
+{
+    // Complete projection by doing division by w.
+    shadowPosH.xyz /= shadowPosH.w;
+
+    // Depth in NDC space.
+    float depth = shadowPosH.z;
+
+    // PCF
+    if(true){
+        uint width, height, numMips;
+        gShadowMap.GetDimensions(0, width, height, numMips);
+
+    // Texel size.
+        float dx = 1.0f / (float) width;
+
+        float percentLit = 0.0f;
+        const float2 offsets[9] =
+        {
+            float2(-dx, -dx), float2(0.0f, -dx), float2(dx, -dx),
+        float2(-dx, 0.0f), float2(0.0f, 0.0f), float2(dx, 0.0f),
+        float2(-dx, +dx), float2(0.0f, +dx), float2(dx, +dx)
+        };
+
+        [unroll]
+        for (int i = 0; i < 9; ++i)
+        {
+            percentLit += gShadowMap.SampleCmpLevelZero(gSamShadow,
+            shadowPosH.xy + offsets[i], depth).r;
+        }
+    
+        return percentLit / 9.0f;
+    }
+    else
+    {
+        
+        float shadowDepth = gShadowMap.Sample(gSamLinearWrap, shadowPosH.xy).r;
+        
+        return depth < shadowDepth ? 1 : 0;
+    }
 }
 
 float CalcAttenuation(float d, float falloffStart, float falloffEnd)
