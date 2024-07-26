@@ -87,7 +87,10 @@ float4 ComputeLighting(Light gLights[MaxLights], Material mat,
                        float3 shadowFactor);
 
 float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, float3 tangentW);
+
 float CalcShadowFactor(float4 shadowPosH);
+
+float CalcShadowPCSS(float4 shadowPosH);
 
 struct VertexIn
 {
@@ -157,7 +160,7 @@ float4 PSMain(VertexOut pin) : SV_Target
     Material mat = { diffuseAlbedo, fresnelR0, roughness };
     
     float3 shadowFactor = float3(1.0f, 1.0f, 1.0f);
-    shadowFactor[0] = CalcShadowFactor(pin.ShadowPosH);
+    shadowFactor[0] = CalcShadowPCSS(pin.ShadowPosH);
     
     float4 directLight = ComputeLighting(gLights, mat, pin.WorldPos,
         bumpNormalW, toEyeW, shadowFactor);
@@ -173,7 +176,62 @@ float4 PSMain(VertexOut pin) : SV_Target
     
     return litColor;
 }
+float CalcShadowPCSS(float4 shadowPosH)
+{
+    // Complete projection by doing division by w.
+    shadowPosH.xyz /= shadowPosH.w;
 
+    // Depth in NDC space.
+    float depth = shadowPosH.z;
+    
+    uint width, height, numMips;
+    gShadowMap.GetDimensions(0, width, height, numMips);
+    // Texel size.
+    float dx = 1.0f / (float) width;
+
+    
+    // 1. blocker search : average depth
+    float blockerDepth = 0.0f;
+    float numBlocker = 0;
+    const float2 offsets[9] =
+    {
+        float2(-dx, -dx), float2(0.0f, -dx), float2(dx, -dx),
+            float2(-dx, 0.0f), float2(0.0f, 0.0f), float2(dx, 0.0f),
+            float2(-dx, +dx), float2(0.0f, +dx), float2(dx, +dx)
+    };
+
+    [unroll]
+    for (int i = 0; i < 9; ++i)
+    {
+        float shadowMap = gShadowMap.Sample(gSamLinearWrap, shadowPosH.xy + offsets[i]).r;
+        // 计算遮挡的深度
+        if (shadowMap < depth)
+        {
+            blockerDepth += shadowMap;
+            numBlocker++;
+        }
+    }
+    if(numBlocker < 1.0)
+    {
+        return 1.0f;
+    }
+    blockerDepth /= numBlocker;
+    // 2. Penumbra estimation
+    const float lightSize = 10.0;
+    float penmbraRadius = (depth - blockerDepth) * lightSize / blockerDepth;
+    
+    // 3. Filtering
+    float shadowFactor = 0.0;
+    
+    [unroll]
+    for (int j = 0; j < 9; ++j)
+    {
+        shadowFactor += gShadowMap.SampleCmpLevelZero(gSamShadow,
+            shadowPosH.xy + penmbraRadius * offsets[j], depth).r;
+    }
+    
+    return shadowFactor / 9.0f;
+}
 float CalcShadowFactor(float4 shadowPosH)
 {
     // Complete projection by doing division by w.
@@ -181,6 +239,8 @@ float CalcShadowFactor(float4 shadowPosH)
 
     // Depth in NDC space.
     float depth = shadowPosH.z;
+    // if not set pso
+    float bias = 0.0f;
 
     // PCF
     if(true){
@@ -194,25 +254,23 @@ float CalcShadowFactor(float4 shadowPosH)
         const float2 offsets[9] =
         {
             float2(-dx, -dx), float2(0.0f, -dx), float2(dx, -dx),
-        float2(-dx, 0.0f), float2(0.0f, 0.0f), float2(dx, 0.0f),
-        float2(-dx, +dx), float2(0.0f, +dx), float2(dx, +dx)
+            float2(-dx, 0.0f), float2(0.0f, 0.0f), float2(dx, 0.0f),
+            float2(-dx, +dx), float2(0.0f, +dx), float2(dx, +dx)
         };
 
         [unroll]
         for (int i = 0; i < 9; ++i)
         {
             percentLit += gShadowMap.SampleCmpLevelZero(gSamShadow,
-            shadowPosH.xy + offsets[i], depth).r;
+            shadowPosH.xy + offsets[i], depth - bias).r;
         }
     
         return percentLit / 9.0f;
     }
     else
     {
-        
         float shadowDepth = gShadowMap.Sample(gSamLinearWrap, shadowPosH.xy).r;
-        
-        return depth < shadowDepth ? 1 : 0;
+        return depth < shadowDepth + bias ? 1 : 0;
     }
 }
 
