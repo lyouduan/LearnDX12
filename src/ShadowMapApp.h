@@ -10,7 +10,7 @@ enum RenderLayer : int
 	Debug,
 	AlphaTest,
 	SkyBox,
-	OpaqueDynamicReflectors,
+	QuadFull,
 	Count
 };
 struct RenderItem
@@ -69,6 +69,7 @@ private:
 	void BuildShaderResourceView();
 	void BuildRootSignature();
 	void BuildShadersAndInputLayout();
+	void BuildQuadGeometry();
 	void BuildShapeGeometry();
 	void BuildSkySphereGeometry();
 
@@ -79,6 +80,7 @@ private:
 	void DrawRenderItems(std::vector<RenderItem*>);
 	void BuildFrameResources();
 	void DrawSceneToShadowMap();
+	void DrawShadowMapToShadow2Map();
 
 protected:
 	ComPtr<ID3D12RootSignature> rootSignature;
@@ -103,6 +105,7 @@ protected:
 	UINT matCount = 0;
 	UINT mSkyTexHeapIndex = 0;
 	UINT mShadowMapHeapIndex = 0;
+	UINT mShadowTargetHeapIndex = 0;
 	UINT mNullCubeSrvIndex = 0;
 	UINT mNullTexSrvIndex = 0;
 
@@ -136,6 +139,7 @@ protected:
 	// shadow map info
 	DirectX::BoundingSphere mSceneBounds;
 	std::unique_ptr<ShadowMap> mShadowMap = nullptr;
+	std::unique_ptr<ShadowRenderTarget> mShadowRenderTarget = nullptr;
 
 	float mLightNearZ = 0.0f;
 	float mLightFarZ = 0.0f;

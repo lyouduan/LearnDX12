@@ -24,6 +24,7 @@
 #include "GameTime.h"
 #include "UploadBuffer.h"
 #include "ShadowMap.h"
+#include "ShadowRenderTarget.h"
 #include "GeometryGenerator.h"
 #include "FrameResource.h"
 #include "Wave.h"

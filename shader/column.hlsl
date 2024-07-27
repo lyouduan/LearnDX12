@@ -62,8 +62,9 @@ cbuffer cbPerObject : register(b1)
 }
 TextureCube gCubeMap : register(t0); //所有漫反射贴图
 Texture2D  gShadowMap : register(t1);
+Texture2D  gShadowTarget : register(t2);
 
-Texture2D gDiffuseMap[10] : register(t2); //所有漫反射贴图
+Texture2D gDiffuseMap[10] : register(t3); //所有漫反射贴图
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 
@@ -91,6 +92,8 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
 float CalcShadowFactor(float4 shadowPosH);
 
 float CalcShadowPCSS(float4 shadowPosH);
+
+float CalcShadowVSSM(float4 shadowPosH);
 
 struct VertexIn
 {
@@ -188,7 +191,6 @@ float CalcShadowPCSS(float4 shadowPosH)
     gShadowMap.GetDimensions(0, width, height, numMips);
     // Texel size.
     float dx = 1.0f / (float) width;
-
     
     // 1. blocker search : average depth
     float blockerDepth = 0.0f;
@@ -211,26 +213,31 @@ float CalcShadowPCSS(float4 shadowPosH)
             numBlocker++;
         }
     }
+    // current object is visible if not block.
     if(numBlocker < 1.0)
     {
         return 1.0f;
     }
+    
     blockerDepth /= numBlocker;
     // 2. Penumbra estimation
-    const float lightSize = 10.0;
+    const float lightSize = 5.0;
     float penmbraRadius = (depth - blockerDepth) * lightSize / blockerDepth;
     
     // 3. Filtering
     float shadowFactor = 0.0;
     
     [unroll]
-    for (int j = 0; j < 9; ++j)
+    for (int i = -3; i <= 3; ++i)
     {
-        shadowFactor += gShadowMap.SampleCmpLevelZero(gSamShadow,
-            shadowPosH.xy + penmbraRadius * offsets[j], depth).r;
+        for (int j = -3; j <= 3; ++j)
+        {
+            shadowFactor += gShadowMap.SampleCmpLevelZero(gSamShadow,
+                shadowPosH.xy + dx * penmbraRadius * float2(i, j), depth).r;
+        }
     }
     
-    return shadowFactor / 9.0f;
+    return shadowFactor / 49.0f;
 }
 float CalcShadowFactor(float4 shadowPosH)
 {

@@ -22,11 +22,13 @@ bool ShadowMapApp::Init(HINSTANCE hInstance, int nShowCmd)
 
 	mShadowMap = std::make_unique<ShadowMap>(device.Get(), 2048, 2048);
 
+	mShadowRenderTarget = std::make_unique<ShadowRenderTarget>(device.Get(), 2048, 2048, DXGI_FORMAT_R8G8B8A8_UNORM);
 	loadTexutres();
 
 	BuildRootSignature();
 	BuildDescriptorHeaps();
 	BuildShadersAndInputLayout();
+	BuildQuadGeometry();
 	BuildShapeGeometry();
 	BuildSkullGeometry();
 	BuildSkySphereGeometry();
@@ -68,9 +70,15 @@ void ShadowMapApp::Draw()
 	cmdList->SetGraphicsRootDescriptorTable(3, mNUllSrv);
 
 	// texture2D srv
-	cmdList->SetGraphicsRootDescriptorTable(5, srvHeap->GetGPUDescriptorHandleForHeapStart());
+	cmdList->SetGraphicsRootDescriptorTable(6, srvHeap->GetGPUDescriptorHandleForHeapStart());
 
 	DrawSceneToShadowMap();
+
+	// shadowTarget
+	CD3DX12_GPU_DESCRIPTOR_HANDLE shadowDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
+	shadowDescriptor.Offset(mShadowMapHeapIndex, srvDescriptorSize);
+	cmdList->SetGraphicsRootDescriptorTable(4, shadowDescriptor);
+	DrawShadowMapToShadow2Map();
 
 	cmdList->RSSetViewports(1, &viewPort);
 	cmdList->RSSetScissorRects(1, &scissorRect);
@@ -113,9 +121,8 @@ void ShadowMapApp::Draw()
 	skyTexDescriptor.Offset(mSkyTexHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
 
-	CD3DX12_GPU_DESCRIPTOR_HANDLE shadowDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
-	shadowDescriptor.Offset(mShadowMapHeapIndex, srvDescriptorSize);
-	cmdList->SetGraphicsRootDescriptorTable(4, shadowDescriptor);
+	shadowDescriptor.Offset(1, srvDescriptorSize);
+	cmdList->SetGraphicsRootDescriptorTable(5, shadowDescriptor);
 
 	cmdList->SetPipelineState(psos["opaque"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
@@ -225,9 +232,9 @@ void ShadowMapApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void ShadowMapApp::CreateDescriptorHeap()
 {
-	// add +6 RTV for cube render target
+	// add +1 RTV for shadow render target
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc;
-	rtvHeapDesc.NumDescriptors = FrameCount;
+	rtvHeapDesc.NumDescriptors = FrameCount + 1;
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	rtvHeapDesc.NodeMask = 0;
@@ -237,14 +244,17 @@ void ShadowMapApp::CreateDescriptorHeap()
 
 
 	// add +1 DSV for shadow map
+	// add +1 DSV for shadowTarget
 	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc;
-	dsvHeapDesc.NumDescriptors = 2;
+	dsvHeapDesc.NumDescriptors = 3;
 	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	dsvHeapDesc.NodeMask = 0;
 	ThrowIfFailed(device->CreateDescriptorHeap(
 		&dsvHeapDesc, IID_PPV_ARGS(dsvHeap.GetAddressOf())
 	));
+
+
 }
 
 void ShadowMapApp::onKeybordInput(const GameTime& gt)
@@ -760,8 +770,9 @@ void ShadowMapApp::BuildShaderResourceView()
 
 	mSkyTexHeapIndex = (UINT)tex2DList.size();//7
 	mShadowMapHeapIndex = mSkyTexHeapIndex + 1;//8
+	mShadowTargetHeapIndex = mShadowMapHeapIndex + 1;//9
 
-	mNullCubeSrvIndex = mShadowMapHeapIndex + 1;//9
+	mNullCubeSrvIndex = mShadowTargetHeapIndex + 1;//10
 	mNullTexSrvIndex = mNullCubeSrvIndex + 1;
 
 	auto srvCpuStart = srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -786,20 +797,29 @@ void ShadowMapApp::BuildShaderResourceView()
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mShadowMapHeapIndex, srvDescriptorSize),
 		CD3DX12_CPU_DESCRIPTOR_HANDLE(dsvCpuStart, 1, dsvDescriptorSize)
 	);
+
+	auto rtvCpuStart = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+	mShadowRenderTarget->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mShadowTargetHeapIndex, srvDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mShadowTargetHeapIndex, srvDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvCpuStart, 2, rtvDescriptorSize)
+	);
 }
 
 
 void ShadowMapApp::BuildRootSignature()
 {
 	// 每个根参数只能绑定一个寄存器空间中的特定类型资源
-	CD3DX12_ROOT_PARAMETER slotRootParameter[6];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[7];
 
 	CD3DX12_DESCRIPTOR_RANGE srvTable0;
 	srvTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0);
 	CD3DX12_DESCRIPTOR_RANGE srvTable1;
 	srvTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0);
 	CD3DX12_DESCRIPTOR_RANGE srvTable2;
-	srvTable2.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 2, 0);
+	srvTable2.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0);
+	CD3DX12_DESCRIPTOR_RANGE srvTable3;
+	srvTable3.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 3, 0);
 
 	slotRootParameter[0].InitAsConstantBufferView(0);
 	slotRootParameter[1].InitAsConstantBufferView(1);
@@ -808,10 +828,11 @@ void ShadowMapApp::BuildRootSignature()
 	slotRootParameter[3].InitAsDescriptorTable(1, &srvTable0);
 	slotRootParameter[4].InitAsDescriptorTable(1, &srvTable1);
 	slotRootParameter[5].InitAsDescriptorTable(1, &srvTable2);
+	slotRootParameter[6].InitAsDescriptorTable(1, &srvTable3);
 
 	auto staticSamplers = GetStaticSamplers();
 
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(6,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(7,
 		slotRootParameter,
 		(UINT)staticSamplers.size(),
 		staticSamplers.data(),
@@ -855,6 +876,56 @@ void ShadowMapApp::BuildShadersAndInputLayout()
 
 	shaders["debugVS"] = CompileShader(std::wstring(L"shader/shadowDebug.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
 	shaders["debugPS"] = CompileShader(std::wstring(L"shader/shadowDebug.hlsl").c_str(), nullptr, "PSMain", "ps_5_1");
+
+	shaders["shadowTargetVS"] = CompileShader(std::wstring(L"shader/shadowTarget.hlsl").c_str(), nullptr, "VSMain", "vs_5_1");
+	shaders["shadowTargetPS"] = CompileShader(std::wstring(L"shader/shadowTarget.hlsl").c_str(), nullptr, "PSMain", "ps_5_1");
+}
+
+void ShadowMapApp::BuildQuadGeometry()
+{
+	GeometryGenerator geoGen;
+	GeometryGenerator::MeshData quadFull = geoGen.CreateQuad(-1.0f, 1.0f, 2.0f, 2.0f, 0.0f);
+
+	size_t verticesCount = quadFull.Vertices.size();
+	std::vector<Vertex> vertices(verticesCount);
+
+	for (size_t i = 0; i < verticesCount; i++)
+	{
+		vertices[i].Pos = quadFull.Vertices[i].Position;
+		vertices[i].Normal = quadFull.Vertices[i].Normal;
+		vertices[i].Tex = quadFull.Vertices[i].TexC;
+		vertices[i].TangentU = quadFull.Vertices[i].TangentU;
+	}
+
+	std::vector<std::uint16_t> indices = quadFull.GetIndices16();
+
+	const UINT vbByteSize = verticesCount * sizeof(Vertex);
+	const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
+
+	auto geo = std::make_unique<MeshGeometry>();
+	geo->name = "quadGeo";
+
+	geo->vertexBufferByteSize = vbByteSize;
+	geo->indexBufferByteSize = ibByteSize;
+	geo->vertexByteStride = sizeof(Vertex);
+	geo->indexFormat = DXGI_FORMAT_R16_UINT;
+
+	ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->vertexBufferCpu));	//创建顶点数据内存空间
+	ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->indexBufferCpu));	//创建索引数据内存空间
+	CopyMemory(geo->vertexBufferCpu->GetBufferPointer(), vertices.data(), vbByteSize);	//将顶点数据拷贝至顶点系统内存中
+	CopyMemory(geo->indexBufferCpu->GetBufferPointer(), indices.data(), ibByteSize);	//将索引数据拷贝至索引系统内存中
+	geo->vertexBufferGpu = CreateDefaultBuffer(vbByteSize, vertices.data(), geo->vertexBufferUploader);
+	geo->indexBufferGpu = CreateDefaultBuffer(ibByteSize, indices.data(), geo->indexBufferUploader);
+
+	//绘制三参数
+	SubmeshGeometry submesh;
+	submesh.BaseVertexLocation = 0;
+	submesh.StartIndexLocation = 0;
+	submesh.IndexCount = (UINT)indices.size();
+	//将之前封装好的box对象赋值给无序映射表
+	geo->DrawArgs["quadFull"] = submesh;
+
+	geometries[geo->name] = std::move(geo);
 }
 
 void ShadowMapApp::BuildShapeGeometry()
@@ -1265,6 +1336,22 @@ void ShadowMapApp::BuildPSO()
 	skyPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 	psos["sky"] = nullptr;
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&psos["sky"])));
+
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowTargetPsoDesc = psoDesc;
+	shadowTargetPsoDesc.InputLayout = { inputLayoutDesc.data(), (unsigned int)inputLayoutDesc.size() };
+	shadowTargetPsoDesc.pRootSignature = rootSignature.Get();
+	shadowTargetPsoDesc.VS = {
+		reinterpret_cast<BYTE*>(shaders["shadowTargetVS"]->GetBufferPointer()),
+		shaders["shadowTargetVS"]->GetBufferSize()
+	};
+	shadowTargetPsoDesc.PS = {
+		reinterpret_cast<BYTE*>(shaders["shadowTargetPS"]->GetBufferPointer()),
+		shaders["shadowTargetPS"]->GetBufferSize()
+	};
+	psos["shadowTarget"] = nullptr;
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&shadowTargetPsoDesc, IID_PPV_ARGS(&psos["shadowTarget"])));
+
 }
 
 void ShadowMapApp::BuildRenderItem()
@@ -1307,7 +1394,7 @@ void ShadowMapApp::BuildRenderItem()
 	ballRitem->indexCount = ballRitem->geo->DrawArgs["sphere"].IndexCount;
 	ballRitem->baseVertexLocation = ballRitem->geo->DrawArgs["sphere"].BaseVertexLocation;
 	ballRitem->startIndexLocation = ballRitem->geo->DrawArgs["sphere"].StartIndexLocation;
-	ritemLayer[(int)RenderLayer::OpaqueDynamicReflectors].push_back(ballRitem.get());
+	ritemLayer[(int)RenderLayer::QuadFull].push_back(ballRitem.get());
 	allRitems.push_back(std::move(ballRitem));
 
 	auto skyBoxRitem = std::make_unique<RenderItem>();
@@ -1339,7 +1426,21 @@ void ShadowMapApp::BuildRenderItem()
 	ritemLayer[(int)RenderLayer::Debug].push_back(quadRitem.get());
 	allRitems.push_back(std::move(quadRitem));
 
-	UINT objCBIndex = 5;
+	auto quadFullRitem = std::make_unique<RenderItem>();
+	quadFullRitem->world = MathHelper::Identity4x4();
+	quadFullRitem->texTransform = MathHelper::Identity4x4();
+	quadFullRitem->NumFramesDirty = gNumFrameResources;
+	quadFullRitem->objCBIndex = 5;
+	quadFullRitem->mat = materials["grid"].get();
+	quadFullRitem->primitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+	quadFullRitem->geo = geometries["quadGeo"].get();
+	quadFullRitem->indexCount = quadFullRitem->geo->DrawArgs["quadFull"].IndexCount;
+	quadFullRitem->baseVertexLocation = quadFullRitem->geo->DrawArgs["quadFull"].BaseVertexLocation;
+	quadFullRitem->startIndexLocation = quadFullRitem->geo->DrawArgs["quadFull"].StartIndexLocation;
+	ritemLayer[(int)RenderLayer::QuadFull].push_back(quadFullRitem.get());
+	allRitems.push_back(std::move(quadFullRitem));
+
+	UINT objCBIndex = 6;
 	for (int i = 0; i < 5; i++) {
 		auto leftCylRitem = std::make_unique<RenderItem>();
 		auto rightCylRitem = std::make_unique<RenderItem>();
@@ -1493,6 +1594,39 @@ void ShadowMapApp::DrawSceneToShadowMap()
 			CD3DX12_RESOURCE_BARRIER::Transition(
 				mShadowMap->Resource(),
 				D3D12_RESOURCE_STATE_DEPTH_WRITE,
+				D3D12_RESOURCE_STATE_GENERIC_READ
+			))
+	);
+}
+
+void ShadowMapApp::DrawShadowMapToShadow2Map()
+{
+	cmdList->RSSetViewports(1, get_rvalue_ptr(mShadowRenderTarget->Viewport()));
+	cmdList->RSSetScissorRects(1, get_rvalue_ptr(mShadowRenderTarget->ScissorRect()));
+
+	// change to depth write
+	cmdList->ResourceBarrier(
+		1,
+		get_rvalue_ptr(
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				mShadowRenderTarget->Resource(),
+				D3D12_RESOURCE_STATE_GENERIC_READ,
+				D3D12_RESOURCE_STATE_RENDER_TARGET
+			))
+	);
+
+	cmdList->OMSetRenderTargets(1, get_rvalue_ptr(mShadowRenderTarget->Rtv()), false, nullptr);
+
+	cmdList->SetPipelineState(psos["shadowTarget"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::QuadFull]);
+
+
+	cmdList->ResourceBarrier(
+		1,
+		get_rvalue_ptr(
+			CD3DX12_RESOURCE_BARRIER::Transition(
+				mShadowRenderTarget->Resource(),
+				D3D12_RESOURCE_STATE_RENDER_TARGET,
 				D3D12_RESOURCE_STATE_GENERIC_READ
 			))
 	);

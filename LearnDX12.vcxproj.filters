@@ -72,6 +72,9 @@
     <ClCompile Include="src\ShadowMapApp.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ShadowRenderTarget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\d3dx12.h">
@@ -143,6 +146,9 @@
     <ClInclude Include="src\ShadowMapApp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\ShadowRenderTarget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl" />
@@ -157,6 +163,7 @@
     <None Include="shader\skybox.hlsl" />
     <None Include="shader\shadowmap.hlsl" />
     <None Include="shader\shadowDebug.hlsl" />
+    <None Include="shader\shadowTarget.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />

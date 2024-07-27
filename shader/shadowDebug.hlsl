@@ -68,8 +68,9 @@ cbuffer cbPerObject : register(b1)
 }
 TextureCube gCubeMap : register(t0); //所有漫反射贴图
 Texture2D gShadowMap : register(t1);
+Texture2D gShadowTarget : register(t2);
 
-Texture2D gDiffuseMap[10] : register(t2); //所有漫反射贴图
+Texture2D gDiffuseMap[10] : register(t3); //所有漫反射贴图
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 
@@ -107,5 +108,7 @@ VertexOut VSMain(VertexIn vin)
 
 float4 PSMain(VertexOut pin) : SV_Target
 {
-    return float4(gShadowMap.Sample(gSamLinearWrap, pin.Tex).rrr, 1.0f);
+    //float depth = gShadowTarget.Sample(gSamLinearWrap, pin.Tex).r;
+    //float depth2 = gShadowTarget.Sample(gSamLinearWrap, pin.Tex).g; 
+    return float4(gShadowTarget.Sample(gSamLinearWrap, pin.Tex).g, 1.0f);
 }

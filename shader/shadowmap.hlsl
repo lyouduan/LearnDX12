@@ -68,8 +68,9 @@ cbuffer cbPerObject : register(b1)
 }
 TextureCube gCubeMap : register(t0); //所有漫反射贴图
 Texture2D gShadowMap : register(t1);
+Texture2D gShadowTarget : register(t2);
 
-Texture2D gDiffuseMap[10] : register(t2); //所有漫反射贴图
+Texture2D gDiffuseMap[10] : register(t3); //所有漫反射贴图
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 
