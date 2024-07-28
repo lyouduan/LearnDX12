@@ -1,6 +1,11 @@
 #include "./src/stdafx.h"
 
-#define SM
+#define SSAO
+
+#ifdef SSAO
+#include "./src/SsaoApp.h"
+#define APP SsaoApp
+#endif // 
 
 #ifdef SM
 #include "./src/ShadowMapApp.h"

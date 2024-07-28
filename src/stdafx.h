@@ -26,8 +26,10 @@
 #include "ShadowMap.h"
 #include "ShadowRenderTarget.h"
 #include "GeometryGenerator.h"
-#include "FrameResource.h"
 #include "Wave.h"
 #include "DDSTextureLoader.h"
 #include "Camera.h"
 #include "CubeRenderTarget.h"
+#include "Ssao.h"
+#include "FrameResource.h"
+

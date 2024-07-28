@@ -63,6 +63,9 @@ struct PassConstants
 	float totalTime = 0.0;
 	XMFLOAT4 ambientLight = { 0.0, 0.0, 0.0, 1.0 };
 	XMFLOAT4X4 shadowTransform = MathHelper::Identity4x4();
+	XMFLOAT4X4 view = MathHelper::Identity4x4();
+	XMFLOAT4X4 proj = MathHelper::Identity4x4();
+	XMFLOAT4X4 invProj = MathHelper::Identity4x4();
 	Light lights[MAX_LIGHTS];
 
 	XMFLOAT4 fogColor = { 0.7f, 0.7f, 0.7f, 1.0f };
@@ -88,7 +91,24 @@ struct MatConstants
 	UINT MaterialPad0;
 	UINT MaterialPad1;
 };
+struct SsaoConstants
+{
+	DirectX::XMFLOAT4X4 Proj;
+	DirectX::XMFLOAT4X4 InvProj;
+	DirectX::XMFLOAT4X4 ProjTex;
+	DirectX::XMFLOAT4   OffsetVectors[14];
 
+	// For SsaoBlur.hlsl
+	DirectX::XMFLOAT4 BlurWeights[3];
+
+	DirectX::XMFLOAT2 InvRenderTargetSize = { 0.0f, 0.0f };
+
+	// Coordinates given in view space.
+	float OcclusionRadius = 0.5f;
+	float OcclusionFadeStart = 0.2f;
+	float OcclusionFadeEnd = 2.0f;
+	float SurfaceEpsilon = 0.05f;
+};
 
 struct FrameResource
 {
@@ -107,6 +127,7 @@ struct FrameResource
 	std::unique_ptr<UploadBuffer<PassConstants>> passCB = nullptr;
 	std::unique_ptr<UploadBuffer<Vertex>> WavesVB = nullptr;
 	std::unique_ptr<UploadBuffer<MatConstants>> matCB = nullptr;
+	std::unique_ptr<UploadBuffer<SsaoConstants>> SsaoCB = nullptr;
 
 	std::unique_ptr<UploadBuffer<MaterialData>> matBuffer = nullptr;
 	std::unique_ptr<UploadBuffer<InstanceData>> instanceBuffer = nullptr;

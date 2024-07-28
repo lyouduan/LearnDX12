@@ -63,6 +63,10 @@ cbuffer cbPerObject : register(b1)
     float3 gEyePosW;
     float gTotalTime;
     float4 gAmbientLight;
+    float4x4 gShadowTransform;
+    float4x4 view;
+    float4x4 proj;
+    float4x4 invProj;
     Light gLights[MaxLights];
 }
 

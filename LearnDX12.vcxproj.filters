@@ -75,6 +75,12 @@
     <ClCompile Include="src\ShadowRenderTarget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\SsaoApp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Ssao.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\d3dx12.h">
@@ -149,6 +155,12 @@
     <ClInclude Include="src\ShadowRenderTarget.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\SsaoApp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Ssao.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader\shaders.hlsl" />
@@ -164,6 +176,9 @@
     <None Include="shader\shadowmap.hlsl" />
     <None Include="shader\shadowDebug.hlsl" />
     <None Include="shader\shadowTarget.hlsl" />
+    <None Include="shader\drawNormal.hlsl" />
+    <None Include="shader\ssao.hlsl" />
+    <None Include="shader\blurSsao.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="model\bricks.dds" />
