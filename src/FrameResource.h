@@ -66,6 +66,7 @@ struct PassConstants
 	XMFLOAT4X4 view = MathHelper::Identity4x4();
 	XMFLOAT4X4 proj = MathHelper::Identity4x4();
 	XMFLOAT4X4 invProj = MathHelper::Identity4x4();
+	XMFLOAT4X4 viewProjTex = MathHelper::Identity4x4();
 	Light lights[MAX_LIGHTS];
 
 	XMFLOAT4 fogColor = { 0.7f, 0.7f, 0.7f, 1.0f };

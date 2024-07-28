@@ -153,12 +153,13 @@ void SsaoApp::Draw()
 	shadowDescriptor.Offset(mShadowMapHeapIndex, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(4, shadowDescriptor);
 
-	cmdList->SetPipelineState(psos["opaque"].Get());
-	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
-
 	//CD3DX12_GPU_DESCRIPTOR_HANDLE depthDescriptor(srvHeap->GetGPUDescriptorHandleForHeapStart());
 	//depthDescriptor.Offset(mSsaoHeapIndexStart + 3, srvDescriptorSize);
 	cmdList->SetGraphicsRootDescriptorTable(5, mSsao->AmbientMapSrv());
+
+	cmdList->SetPipelineState(psos["opaque"].Get());
+	DrawRenderItems(ritemLayer[(int)RenderLayer::Opaque]);
+	
 	cmdList->SetPipelineState(psos["debug"].Get());
 	DrawRenderItems(ritemLayer[(int)RenderLayer::Debug]);
 
@@ -361,6 +362,19 @@ void SsaoApp::UpdateMainPassCB()
 	XMStoreFloat4x4(&passConstants.view, XMMatrixTranspose(view));
 	XMStoreFloat4x4(&passConstants.proj, XMMatrixTranspose(proj));
 	XMStoreFloat4x4(&passConstants.invProj, XMMatrixTranspose(invProj));
+
+	XMMATRIX T(
+		0.5f, 0.0f, 0.0f, 0.0f,
+		0.0f, -0.5f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.5f, 0.5f, 0.0f, 1.0f);
+
+	XMMATRIX viewProjTex = XMMatrixMultiply(vp, T);
+	XMStoreFloat4x4(&passConstants.viewProjTex, XMMatrixTranspose(viewProjTex));
+
+	XMMATRIX shadowTransform = XMLoadFloat4x4(&mShadowTransform);
+	XMStoreFloat4x4(&passConstants.shadowTransform, XMMatrixTranspose(shadowTransform));
+
 	passConstants.nearZ = 1.0f;
 	passConstants.farZ = 1000.0f;
 	passConstants.eyePosW = camera.GetPosition3f();
@@ -378,8 +392,7 @@ void SsaoApp::UpdateMainPassCB()
 	XMVECTOR sunDir = -MathHelper::SphericalToCartesian(1.0f, sunTheta, sunPhi);
 	XMStoreFloat3(&passConstants.lights[0].direction, sunDir);
 
-	XMMATRIX shadowTransform = XMLoadFloat4x4(&mShadowTransform);
-	XMStoreFloat4x4(&passConstants.shadowTransform, XMMatrixTranspose(shadowTransform));
+	
 
 	mCurrFrameResource->passCB->CopyData(0, passConstants);
 }

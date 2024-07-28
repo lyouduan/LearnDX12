@@ -73,11 +73,12 @@ cbuffer cbPerObject : register(b1)
     float4x4 view;
     float4x4 proj;
     float4x4 invProj;
+    float4x4 viewProjTex;
     Light gLights[MaxLights];
 }
 TextureCube gCubeMap : register(t0); //所有漫反射贴图
 Texture2D  gShadowMap : register(t1);
-Texture2D  gShadowTarget : register(t2);
+Texture2D  gSsaoMap : register(t2);
 
 Texture2D gDiffuseMap[10] : register(t3); //所有漫反射贴图
 
@@ -123,7 +124,8 @@ struct VertexOut
 {
     float4 PosH : SV_POSITION;
     float4 ShadowPosH : POSITION0;
-    float3 WorldPos : POSITION1;
+    float4 SsaoPosH : POSITION1;
+    float3 WorldPos : POSITION2;
     float3 WorldNormal : NORMAL;
     float2 Tex : TEXCOORD;
     float3 TangentW : TANGENT;
@@ -148,6 +150,8 @@ VertexOut VSMain(VertexIn vin)
     vout.TangentW = mul(vin.Tangent, (float3x3) world);
     
     vout.ShadowPosH = mul(PosW, gShadowTransform);
+    
+    vout.SsaoPosH = mul(PosW, viewProjTex);
     return vout;
 }
 
@@ -174,7 +178,11 @@ float4 PSMain(VertexOut pin) : SV_Target
     
     float3 toEyeW = normalize(gEyePosW - pin.WorldPos);
     
-    float4 ambient = gAmbientLight * diffuseAlbedo;
+    pin.SsaoPosH /= pin.SsaoPosH.w;
+    
+    float ao = gSsaoMap.Sample(gSamLinearClamp, pin.SsaoPosH.xy, 0.0f).r;
+    
+    float4 ambient = ao * gAmbientLight * diffuseAlbedo;
     
     Material mat = { diffuseAlbedo, fresnelR0, roughness };
     
